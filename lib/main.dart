@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'config/app_config.dart';
 import 'services/auth_service.dart';
 import 'services/location_service.dart';
@@ -11,14 +10,16 @@ import 'screens/home_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase
-  await Firebase.initializeApp();
+  // TODO: After Firebase setup, uncomment these:
+  // import 'package:firebase_core/firebase_core.dart';
+  // await Firebase.initializeApp();
 
   // Initialize background location service
   await LocationService.initializeBackgroundService();
 
   // Initialize push notifications
-  await PushNotificationService.instance.initialize();
+  // TODO: After Firebase setup, uncomment:
+  // await PushNotificationService.instance.initialize();
 
   runApp(const KilifiHubRiderApp());
 }
@@ -55,7 +56,7 @@ class KilifiHubRiderApp extends StatelessWidget {
               ),
             ),
           ),
-          cardTheme: CardTheme(
+          cardTheme: CardThemeData(
             elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppConfig.RADIUS_LG),
