@@ -1,0 +1,11 @@
+# This file tracks properties of this Flutter project.
+# Used by Flutter tool to assess capabilities and hot reload.
+#
+# This file does not contain any sensitive information and can be committed
+# to version control.
+
+version:
+  revision: "db7ef5bf9f5d03a24a8b9251a77ef4bfd7e7c7e0"
+  channel: "stable"
+
+project_type: app

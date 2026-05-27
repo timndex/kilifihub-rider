@@ -1,0 +1,17 @@
+include ":app"
+
+def localPropertiesFile = new File(rootProject.projectDir, "local.properties")
+def flutterSdkPath = null
+
+if (localPropertiesFile.exists()) {
+    def properties = new Properties()
+    localPropertiesFile.withInputStream { properties.load(it) }
+    flutterSdkPath = properties.getProperty("flutter.sdk")
+}
+
+if (flutterSdkPath == null) {
+    // Fallback for CI environments like Codemagic
+    flutterSdkPath = System.env.FLUTTER_ROOT ?: '/Users/builder/programs/flutter'
+}
+
+apply from: "$flutterSdkPath/packages/flutter_tools/gradle/app_plugin_loader.gradle"

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "878011470561",
+    "project_id": "kilifihub-rider",
+    "storage_bucket": "kilifihub-rider.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:878011470561:android:410149d9f33593d5bb5da0",
+        "android_client_info": {
+          "package_name": "com.kilifihub.rider"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCKzWaGn_fuByq8d7PAeBRl4KsujklM-qk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

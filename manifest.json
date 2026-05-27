@@ -1,0 +1,24 @@
+{
+    "name": "KilifiHub Rider",
+    "short_name": "KilifiHub",
+    "description": "KilifiHub Delivery Rider Dashboard",
+    "start_url": "/rider-dashboard/",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#ffffff",
+    "theme_color": "#00a082",
+    "icons": [
+        {
+            "src": "/wp-content/uploads/kilifi-icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "/wp-content/uploads/kilifi-icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ],
+    "categories": ["business", "food"],
+    "prefer_related_applications": false
+}
