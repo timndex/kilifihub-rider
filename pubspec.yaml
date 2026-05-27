@@ -28,7 +28,7 @@ dependencies:
   geolocator: ^10.1.0
 
   # Background Services
-  flutter_background_service: ^4.0.0
+  flutter_background_service: ^3.0.1
 
   # Local Notifications (works without Firebase)
   flutter_local_notifications: ^16.3.0
@@ -36,7 +36,7 @@ dependencies:
   # Utilities
   intl: ^0.19.0
   url_launcher: ^6.2.2
-  permission_handler: ^11.1.0
+  permission_handler: ^11.0.1
   flutter_spinkit: ^5.2.0
   connectivity_plus: ^5.0.2
 
