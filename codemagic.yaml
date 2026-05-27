@@ -34,31 +34,22 @@ workflows:
           # Step 5: Update the Android manifest with our permissions
           cat > /tmp/fresh_project/android/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <!-- Location permissions -->
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
               <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
               <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-
-              <!-- Background service permissions -->
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
               <uses-permission android:name="android.permission.WAKE_LOCK" />
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
-              <!-- Network & notification permissions -->
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-              <!-- Vibration for notifications -->
               <uses-permission android:name="android.permission.VIBRATE" />
-
               <application
                   android:label="KilifiHub Rider"
                   android:name="${applicationName}"
                   android:icon="@mipmap/ic_launcher"
                   android:usesCleartextTraffic="true">
-
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
@@ -76,7 +67,6 @@ workflows:
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
-
                   <meta-data
                       android:name="flutterEmbedding"
                       android:value="2" />
@@ -115,29 +105,41 @@ workflows:
         script: |
           echo "Fixing Dart code issues..."
 
-          # Fix push_notification_service.dart - remove const where body is used
+          # Fix push_notification_service.dart
           PUSH_FILE="lib/services/push_notification_service.dart"
           if [ -f "$PUSH_FILE" ]; then
-            # Remove const from AndroidNotificationDetails that uses BigTextStyleInformation(body)
             sed -i '' 's/const AndroidNotificationDetails androidDetails/AndroidNotificationDetails androidDetails/' "$PUSH_FILE"
             sed -i '' 's/const NotificationDetails details/NotificationDetails details/' "$PUSH_FILE"
-
-            # Remove any Firebase imports or references that shouldn't be there
             sed -i '' '/import.*firebase_core/d' "$PUSH_FILE"
             sed -i '' '/import.*firebase_messaging/d' "$PUSH_FILE"
             sed -i '' '/RemoteMessage/d' "$PUSH_FILE"
             sed -i '' '/Firebase.initializeApp/d' "$PUSH_FILE"
             sed -i '' '/FirebaseMessaging/d' "$PUSH_FILE"
-            sed -i '' '/_messaging/d' "$PUSH_FILE"
-
             echo "Fixed push_notification_service.dart"
           fi
 
-          # Fix api_service.dart - StorageService() -> StorageService.instance
+          # Fix api_service.dart
           API_FILE="lib/services/api_service.dart"
           if [ -f "$API_FILE" ]; then
             sed -i '' 's/StorageService()/StorageService.instance/' "$API_FILE"
             echo "Fixed api_service.dart"
+          fi
+
+          # Fix api_config.dart - GPS_DISTANCE_FILTER_METERS must be int
+          API_CFG="lib/config/api_config.dart"
+          if [ -f "$API_CFG" ]; then
+            sed -i '' 's/static const double GPS_DISTANCE_FILTER_METERS = 5.0;/static const int GPS_DISTANCE_FILTER_METERS = 5;/' "$API_CFG"
+            echo "Fixed api_config.dart"
+          fi
+
+          # Fix location_service.dart - remove .toInt() calls and fix getCurrentPosition
+          LOC_FILE="lib/services/location_service.dart"
+          if [ -f "$LOC_FILE" ]; then
+            sed -i '' 's/ApiConfig.GPS_DISTANCE_FILTER_METERS.toInt()/ApiConfig.GPS_DISTANCE_FILTER_METERS/g' "$LOC_FILE"
+            sed -i '' 's/locationSettings: const LocationSettings(/desiredAccuracy: LocationAccuracy.high,/' "$LOC_FILE"
+            sed -i '' '/accuracy: LocationAccuracy.high,/d' "$LOC_FILE"
+            sed -i '' '/timeLimit: Duration(seconds: 10),/s//timeLimit: Duration(seconds: 10),/' "$LOC_FILE"
+            echo "Fixed location_service.dart"
           fi
 
           echo "=== Dart fixes complete ==="
