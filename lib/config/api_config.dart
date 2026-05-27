@@ -59,7 +59,7 @@ class ApiConfig {
   // GPS Settings
   // ============================================================
   static const int GPS_UPDATE_INTERVAL_SECONDS = 10;
-  static const double GPS_DISTANCE_FILTER_METERS = 5.0;
+  static const int GPS_DISTANCE_FILTER_METERS = 5;
 
   // ============================================================
   // Order Settings
