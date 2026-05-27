@@ -15,8 +15,30 @@ workflows:
           include: true
 
     scripts:
-      - name: Fix Android settings.gradle
+      - name: Show directory structure
         script: |
+          echo "=== Current directory ==="
+          pwd
+          echo "=== Files in current directory ==="
+          ls -la
+          echo "=== All folders (depth 2) ==="
+          find . -maxdepth 2 -type d | head -50
+          echo "=== Looking for pubspec.yaml ==="
+          find . -name "pubspec.yaml" 2>/dev/null
+          echo "=== Looking for android folder ==="
+          find . -name "android" -type d 2>/dev/null
+          echo "=== Looking for settings.gradle ==="
+          find . -name "settings.gradle" 2>/dev/null
+
+      - name: Navigate to project and fix Gradle files
+        script: |
+          # Find where pubspec.yaml is - that's our project root
+          PUBSPEC_DIR=$(find . -name "pubspec.yaml" -not -path "./.git/*" | head -1 | xargs dirname)
+          echo "Found pubspec.yaml in: $PUBSPEC_DIR"
+          cd "$PUBSPEC_DIR"
+          echo "Working from: $(pwd)"
+
+          # Fix settings.gradle
           cat > android/settings.gradle << 'SETTINGSEOF'
           pluginManagement {
               def flutterSdkPath = null
@@ -50,8 +72,7 @@ workflows:
           include ":app"
           SETTINGSEOF
 
-      - name: Fix Android root build.gradle
-        script: |
+          # Fix root build.gradle
           cat > android/build.gradle << 'BUILDEOF'
           allprojects {
               repositories {
@@ -75,8 +96,7 @@ workflows:
           }
           BUILDEOF
 
-      - name: Fix Android app build.gradle
-        script: |
+          # Fix app build.gradle
           cat > android/app/build.gradle << 'APPBUILDEOF'
           plugins {
               id "com.android.application"
@@ -150,15 +170,22 @@ workflows:
           }
           APPBUILDEOF
 
-      - name: Fix Gradle wrapper
-        script: |
+          # Fix Gradle wrapper
           sed -i '' 's|gradle-8.3-all.zip|gradle-8.4-all.zip|g' android/gradle/wrapper/gradle-wrapper.properties
 
+          echo "=== All Gradle files fixed ==="
+
       - name: Get Flutter packages
-        script: flutter pub get
+        script: |
+          PUBSPEC_DIR=$(find . -name "pubspec.yaml" -not -path "./.git/*" | head -1 | xargs dirname)
+          cd "$PUBSPEC_DIR"
+          flutter pub get
 
       - name: Build APK
-        script: flutter build apk --debug
+        script: |
+          PUBSPEC_DIR=$(find . -name "pubspec.yaml" -not -path "./.git/*" | head -1 | xargs dirname)
+          cd "$PUBSPEC_DIR"
+          flutter build apk --debug
 
     artifacts:
       - build/**/outputs/apk/**/*.apk
