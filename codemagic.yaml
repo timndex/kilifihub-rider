@@ -91,18 +91,22 @@ workflows:
           done
           echo "=== Namespace fix complete ==="
 
-      - name: Fix all Dart code issues
+      - name: Fix all Dart code issues and pubspec
         script: |
-          echo "Fixing Dart code issues..."
+          echo "Fixing Dart code issues and pubspec..."
+
+          # ---- pubspec.yaml - upgrade background service to v5 ----
+          PUBSPEC_FILE="pubspec.yaml"
+          if [ -f "$PUBSPEC_FILE" ]; then
+            sed -i '' 's/flutter_background_service: \^4.0.0/flutter_background_service: ^5.0.0/' "$PUBSPEC_FILE"
+            echo "Fixed pubspec.yaml"
+          fi
 
           # ---- main.dart ----
           MAIN_FILE="lib/main.dart"
           if [ -f "$MAIN_FILE" ]; then
-            # Remove firebase_core import
             sed -i '' "/import.*firebase_core/d" "$MAIN_FILE"
-            # Comment out Firebase.initializeApp() if not already commented
             sed -i '' 's/^\(\s*\)await Firebase.initializeApp();/\1\/\/ await Firebase.initializeApp();/' "$MAIN_FILE"
-            # Fix CardTheme -> CardThemeData
             sed -i '' 's/CardTheme(/CardThemeData(/' "$MAIN_FILE"
             echo "Fixed main.dart"
           fi
@@ -138,17 +142,17 @@ workflows:
           LOC_FILE="lib/services/location_service.dart"
           if [ -f "$LOC_FILE" ]; then
             sed -i '' 's/ApiConfig.GPS_DISTANCE_FILTER_METERS.toInt()/ApiConfig.GPS_DISTANCE_FILTER_METERS/g' "$LOC_FILE"
-            # Fix getCurrentPosition - replace locationSettings with named params
             sed -i '' 's/locationSettings: const LocationSettings(/desiredAccuracy: LocationAccuracy.high,/' "$LOC_FILE"
-            # Remove the now-broken lines inside getCurrentPosition
             sed -i '' '/accuracy: LocationAccuracy.high,$/d' "$LOC_FILE"
             sed -i '' '/timeLimit: Duration(seconds: 10),$/s//timeLimit: Duration(seconds: 10),/' "$LOC_FILE"
-            # Fix closing paren
             sed -i '' 's/        ),$/      );/' "$LOC_FILE"
             echo "Fixed location_service.dart"
           fi
 
-          echo "=== All Dart fixes complete ==="
+          echo "=== All fixes complete ==="
+
+      - name: Re-get packages after pubspec fix
+        script: flutter pub get
 
       - name: Build APK
         script: flutter build apk --debug
