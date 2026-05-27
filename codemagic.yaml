@@ -95,10 +95,12 @@ workflows:
         script: |
           echo "Fixing Dart code issues and pubspec..."
 
-          # ---- pubspec.yaml - upgrade background service to v5 ----
+          # ---- pubspec.yaml - upgrade packages for latest Flutter/Android ----
           PUBSPEC_FILE="pubspec.yaml"
           if [ -f "$PUBSPEC_FILE" ]; then
             sed -i '' 's/flutter_background_service: \^4.0.0/flutter_background_service: ^5.0.0/' "$PUBSPEC_FILE"
+            sed -i '' 's/flutter_background_service: \^3.0.1/flutter_background_service: ^5.0.0/' "$PUBSPEC_FILE"
+            sed -i '' 's/flutter_local_notifications: \^16.3.0/flutter_local_notifications: ^18.0.0/' "$PUBSPEC_FILE"
             echo "Fixed pubspec.yaml"
           fi
 
