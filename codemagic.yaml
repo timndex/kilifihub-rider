@@ -96,27 +96,51 @@ workflows:
 
       - name: Fix missing namespaces in cached plugins
         script: |
-          # This fixes the "Namespace not specified" error for plugins
-          # that haven't been updated for AGP 8+
           echo "Fixing missing namespaces in cached plugins..."
-
-          # Find all plugin build.gradle files that are missing namespace
           for BUILD_FILE in $(find ~/.pub-cache -name "build.gradle" -path "*/android/build.gradle"); do
             if ! grep -q "namespace" "$BUILD_FILE"; then
-              # Extract the package name from the AndroidManifest.xml
               MANIFEST=$(find "$(dirname "$BUILD_FILE")" -name "AndroidManifest.xml" | head -1)
               if [ -f "$MANIFEST" ]; then
                 PACKAGE=$(grep -o 'package="[^"]*"' "$MANIFEST" | head -1 | sed 's/package="//;s/"//')
                 if [ -n "$PACKAGE" ]; then
                   echo "Adding namespace '$PACKAGE' to $BUILD_FILE"
-                  # Add namespace right after the 'android {' line
                   sed -i '' "s/^android {/android {\n    namespace '$PACKAGE'/" "$BUILD_FILE"
                 fi
               fi
             fi
           done
-
           echo "=== Namespace fix complete ==="
+
+      - name: Fix Dart code issues
+        script: |
+          echo "Fixing Dart code issues..."
+
+          # Fix push_notification_service.dart - remove const where body is used
+          PUSH_FILE="lib/services/push_notification_service.dart"
+          if [ -f "$PUSH_FILE" ]; then
+            # Remove const from AndroidNotificationDetails that uses BigTextStyleInformation(body)
+            sed -i '' 's/const AndroidNotificationDetails androidDetails/AndroidNotificationDetails androidDetails/' "$PUSH_FILE"
+            sed -i '' 's/const NotificationDetails details/NotificationDetails details/' "$PUSH_FILE"
+
+            # Remove any Firebase imports or references that shouldn't be there
+            sed -i '' '/import.*firebase_core/d' "$PUSH_FILE"
+            sed -i '' '/import.*firebase_messaging/d' "$PUSH_FILE"
+            sed -i '' '/RemoteMessage/d' "$PUSH_FILE"
+            sed -i '' '/Firebase.initializeApp/d' "$PUSH_FILE"
+            sed -i '' '/FirebaseMessaging/d' "$PUSH_FILE"
+            sed -i '' '/_messaging/d' "$PUSH_FILE"
+
+            echo "Fixed push_notification_service.dart"
+          fi
+
+          # Fix api_service.dart - StorageService() -> StorageService.instance
+          API_FILE="lib/services/api_service.dart"
+          if [ -f "$API_FILE" ]; then
+            sed -i '' 's/StorageService()/StorageService.instance/' "$API_FILE"
+            echo "Fixed api_service.dart"
+          fi
+
+          echo "=== Dart fixes complete ==="
 
       - name: Build APK
         script: flutter build apk --debug
