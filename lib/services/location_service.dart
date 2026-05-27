@@ -66,7 +66,7 @@ class LocationService {
     // Location tracking in background
     const LocationSettings locationSettings = LocationSettings(
       accuracy: LocationAccuracy.high,
-      distanceFilter: ApiConfig.GPS_DISTANCE_FILTER_METERS.toInt(),
+      distanceFilter: ApiConfig.GPS_DISTANCE_FILTER_METERS,
     );
 
     Geolocator.getPositionStream(locationSettings: locationSettings).listen(
@@ -128,7 +128,7 @@ class LocationService {
     // Also start foreground stream for in-app map display
     const LocationSettings locationSettings = LocationSettings(
       accuracy: LocationAccuracy.high,
-      distanceFilter: ApiConfig.GPS_DISTANCE_FILTER_METERS.toInt(),
+      distanceFilter: ApiConfig.GPS_DISTANCE_FILTER_METERS,
     );
 
     _positionStream = Geolocator.getPositionStream(
@@ -168,10 +168,8 @@ class LocationService {
   Future<Position?> getCurrentPosition() async {
     try {
       return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 10),
-        ),
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: Duration(seconds: 10),
       );
     } catch (e) {
       return null;
