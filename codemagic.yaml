@@ -1,1 +1,111 @@
 
+workflows:
+  android-apk:
+    name: KilifiHub Rider Android APK
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+
+    environment:
+      flutter: stable
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+
+    scripts:
+      - name: Create fresh Flutter project and copy our code
+        script: |
+          # Step 1: Create a brand new Flutter project with correct Gradle files
+          flutter create --org com.kilifihub --project-name kilifihub_rider /tmp/fresh_project
+
+          # Step 2: Copy our Dart code
+          cp -r lib/ /tmp/fresh_project/lib/
+
+          # Step 3: Copy our pubspec.yaml
+          cp pubspec.yaml /tmp/fresh_project/pubspec.yaml
+
+          # Step 4: Copy assets if they exist
+          if [ -d "assets" ]; then
+            cp -r assets/ /tmp/fresh_project/assets/
+          fi
+
+          # Step 5: Update the Android manifest with our permissions
+          cat > /tmp/fresh_project/android/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <!-- Location permissions -->
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+              <!-- Background service permissions -->
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+              <!-- Network & notification permissions -->
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+              <!-- Vibration for notifications -->
+              <uses-permission android:name="android.permission.VIBRATE" />
+
+              <application
+                  android:label="KilifiHub Rider"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/ic_launcher"
+                  android:usesCleartextTraffic="true">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <meta-data
+                        android:name="io.flutter.embedding.android.NormalTheme"
+                        android:resource="@style/NormalTheme"
+                        />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+
+                  <meta-data
+                      android:name="flutterEmbedding"
+                      android:value="2" />
+              </application>
+          </manifest>
+          MANIFESTEOF
+
+          # Step 6: Switch to the fresh project
+          rm -rf /Users/builder/clone/*
+          cp -r /tmp/fresh_project/* /Users/builder/clone/
+          cp -r /tmp/fresh_project/.* /Users/builder/clone/ 2>/dev/null || true
+
+          echo "=== Fresh project ready ==="
+          ls -la /Users/builder/clone/
+
+      - name: Get Flutter packages
+        script: flutter pub get
+
+      - name: Build APK
+        script: flutter build apk --debug
+
+    artifacts:
+      - build/**/outputs/apk/**/*.apk
+
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com
+        notify:
+          success: true
+          failure: true
