@@ -7,7 +7,7 @@ import 'storage_service.dart';
 class ApiService {
   static ApiService? _instance;
   late final Dio _dio;
-  final StorageService _storage = StorageService();
+  final StorageService _storage = StorageService.instance;
 
   ApiService._() {
     _dio = Dio(BaseOptions(
