@@ -17,21 +17,13 @@ workflows:
     scripts:
       - name: Create fresh Flutter project and copy our code
         script: |
-          # Step 1: Create a brand new Flutter project with correct Gradle files
           flutter create --org com.kilifihub --project-name kilifihub_rider /tmp/fresh_project
-
-          # Step 2: Copy our Dart code
           cp -r lib/ /tmp/fresh_project/lib/
-
-          # Step 3: Copy our pubspec.yaml
           cp pubspec.yaml /tmp/fresh_project/pubspec.yaml
-
-          # Step 4: Copy assets if they exist
           if [ -d "assets" ]; then
             cp -r assets/ /tmp/fresh_project/assets/
           fi
 
-          # Step 5: Update the Android manifest with our permissions
           cat > /tmp/fresh_project/android/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -74,11 +66,9 @@ workflows:
           </manifest>
           MANIFESTEOF
 
-          # Step 6: Switch to the fresh project
           rm -rf /Users/builder/clone/*
           cp -r /tmp/fresh_project/* /Users/builder/clone/
           cp -r /tmp/fresh_project/.* /Users/builder/clone/ 2>/dev/null || true
-
           echo "=== Fresh project ready ==="
 
       - name: Get Flutter packages
@@ -101,11 +91,23 @@ workflows:
           done
           echo "=== Namespace fix complete ==="
 
-      - name: Fix Dart code issues
+      - name: Fix all Dart code issues
         script: |
           echo "Fixing Dart code issues..."
 
-          # Fix push_notification_service.dart
+          # ---- main.dart ----
+          MAIN_FILE="lib/main.dart"
+          if [ -f "$MAIN_FILE" ]; then
+            # Remove firebase_core import
+            sed -i '' "/import.*firebase_core/d" "$MAIN_FILE"
+            # Comment out Firebase.initializeApp() if not already commented
+            sed -i '' 's/^\(\s*\)await Firebase.initializeApp();/\1\/\/ await Firebase.initializeApp();/' "$MAIN_FILE"
+            # Fix CardTheme -> CardThemeData
+            sed -i '' 's/CardTheme(/CardThemeData(/' "$MAIN_FILE"
+            echo "Fixed main.dart"
+          fi
+
+          # ---- push_notification_service.dart ----
           PUSH_FILE="lib/services/push_notification_service.dart"
           if [ -f "$PUSH_FILE" ]; then
             sed -i '' 's/const AndroidNotificationDetails androidDetails/AndroidNotificationDetails androidDetails/' "$PUSH_FILE"
@@ -118,31 +120,35 @@ workflows:
             echo "Fixed push_notification_service.dart"
           fi
 
-          # Fix api_service.dart
+          # ---- api_service.dart ----
           API_FILE="lib/services/api_service.dart"
           if [ -f "$API_FILE" ]; then
             sed -i '' 's/StorageService()/StorageService.instance/' "$API_FILE"
             echo "Fixed api_service.dart"
           fi
 
-          # Fix api_config.dart - GPS_DISTANCE_FILTER_METERS must be int
+          # ---- api_config.dart ----
           API_CFG="lib/config/api_config.dart"
           if [ -f "$API_CFG" ]; then
             sed -i '' 's/static const double GPS_DISTANCE_FILTER_METERS = 5.0;/static const int GPS_DISTANCE_FILTER_METERS = 5;/' "$API_CFG"
             echo "Fixed api_config.dart"
           fi
 
-          # Fix location_service.dart - remove .toInt() calls and fix getCurrentPosition
+          # ---- location_service.dart ----
           LOC_FILE="lib/services/location_service.dart"
           if [ -f "$LOC_FILE" ]; then
             sed -i '' 's/ApiConfig.GPS_DISTANCE_FILTER_METERS.toInt()/ApiConfig.GPS_DISTANCE_FILTER_METERS/g' "$LOC_FILE"
+            # Fix getCurrentPosition - replace locationSettings with named params
             sed -i '' 's/locationSettings: const LocationSettings(/desiredAccuracy: LocationAccuracy.high,/' "$LOC_FILE"
-            sed -i '' '/accuracy: LocationAccuracy.high,/d' "$LOC_FILE"
-            sed -i '' '/timeLimit: Duration(seconds: 10),/s//timeLimit: Duration(seconds: 10),/' "$LOC_FILE"
+            # Remove the now-broken lines inside getCurrentPosition
+            sed -i '' '/accuracy: LocationAccuracy.high,$/d' "$LOC_FILE"
+            sed -i '' '/timeLimit: Duration(seconds: 10),$/s//timeLimit: Duration(seconds: 10),/' "$LOC_FILE"
+            # Fix closing paren
+            sed -i '' 's/        ),$/      );/' "$LOC_FILE"
             echo "Fixed location_service.dart"
           fi
 
-          echo "=== Dart fixes complete ==="
+          echo "=== All Dart fixes complete ==="
 
       - name: Build APK
         script: flutter build apk --debug
