@@ -2,8 +2,6 @@ plugins {
     id "com.android.application"
     id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
-    // TODO: Uncomment after Firebase setup (requires google-services.json)
-    // id "com.google.gms.google-services"
 }
 
 def localProperties = new Properties()
@@ -69,7 +67,4 @@ flutter {
 
 dependencies {
     implementation 'androidx.multidex:multidex:2.0.1'
-
-    // TODO: Uncomment after Firebase setup
-    // implementation 'com.google.firebase:firebase-messaging:23.4.0'
 }
