@@ -1,4 +1,3 @@
-
 workflows:
   android-apk:
     name: KilifiHub Rider Android APK
@@ -91,10 +90,33 @@ workflows:
           cp -r /tmp/fresh_project/.* /Users/builder/clone/ 2>/dev/null || true
 
           echo "=== Fresh project ready ==="
-          ls -la /Users/builder/clone/
 
       - name: Get Flutter packages
         script: flutter pub get
+
+      - name: Fix missing namespaces in cached plugins
+        script: |
+          # This fixes the "Namespace not specified" error for plugins
+          # that haven't been updated for AGP 8+
+          echo "Fixing missing namespaces in cached plugins..."
+
+          # Find all plugin build.gradle files that are missing namespace
+          for BUILD_FILE in $(find ~/.pub-cache -name "build.gradle" -path "*/android/build.gradle"); do
+            if ! grep -q "namespace" "$BUILD_FILE"; then
+              # Extract the package name from the AndroidManifest.xml
+              MANIFEST=$(find "$(dirname "$BUILD_FILE")" -name "AndroidManifest.xml" | head -1)
+              if [ -f "$MANIFEST" ]; then
+                PACKAGE=$(grep -o 'package="[^"]*"' "$MANIFEST" | head -1 | sed 's/package="//;s/"//')
+                if [ -n "$PACKAGE" ]; then
+                  echo "Adding namespace '$PACKAGE' to $BUILD_FILE"
+                  # Add namespace right after the 'android {' line
+                  sed -i '' "s/^android {/android {\n    namespace '$PACKAGE'/" "$BUILD_FILE"
+                fi
+              fi
+            fi
+          done
+
+          echo "=== Namespace fix complete ==="
 
       - name: Build APK
         script: flutter build apk --debug
