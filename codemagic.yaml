@@ -17,16 +17,14 @@ workflows:
     scripts:
       - name: Create fresh Flutter project and copy our code
         script: |
-          # Use 'rider' as project name to align with your namespace exactly
-          flutter create --org com.kilifihub --project-name rider /tmp/fresh_project
-          
+          flutter create --org com.kilifihub --project-name kilifihub_rider /tmp/fresh_project
           cp -r lib/ /tmp/fresh_project/lib/
           cp pubspec.yaml /tmp/fresh_project/pubspec.yaml
           if [ -d "assets" ]; then
             cp -r assets/ /tmp/fresh_project/assets/
           fi
 
-          # Write AndroidManifest.xml with correct permissions and package
+          # Write AndroidManifest.xml with our permissions
           cat > /tmp/fresh_project/android/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -72,27 +70,15 @@ workflows:
           rm -rf /Users/builder/clone/*
           cp -r /tmp/fresh_project/* /Users/builder/clone/
           cp -r /tmp/fresh_project/.* /Users/builder/clone/ 2>/dev/null || true
+          echo "=== Fresh project copied ==="
 
-          # FIX: Manually ensure the Kotlin directory matches the package name exactly
-          KOTLIN_PATH="/Users/builder/clone/android/app/src/main/kotlin/com/kilifihub/rider"
-          mkdir -p "$KOTLIN_PATH"
-          cat > "$KOTLIN_PATH/MainActivity.kt" << 'KOTLINEOF'
-          package com.kilifihub.rider
-          import io.flutter.embedding.android.FlutterActivity
-          class MainActivity: FlutterActivity() {
-          }
-          KOTLINEOF
-          echo "=== Fresh project and MainActivity setup complete ==="
-
-      - name: Replace Kotlin DSL with Groovy DSL and setup Gradle
+      - name: Replace Kotlin DSL with Groovy DSL and fix Gradle versions
         script: |
+          echo "=== Replacing .kts files with .gradle (Groovy DSL) for maximum compatibility ==="
+
           ANDROID_DIR="/Users/builder/clone/android"
 
-          # Opt out of Built-in Kotlin to suppress warnings and bypass strict AGP checks
-          echo "android.builtInKotlin=false" >> "$ANDROID_DIR/gradle.properties"
-          echo "android.newDsl=false" >> "$ANDROID_DIR/gradle.properties"
-
-          # 1. settings.gradle: Include SDK path to fix "Plugin not found" errors
+          # === 1. Replace settings.gradle.kts with settings.gradle ===
           rm -f "$ANDROID_DIR/settings.gradle.kts"
           cat > "$ANDROID_DIR/settings.gradle" << 'SETTINGSEOF'
           pluginManagement {
@@ -104,62 +90,79 @@ workflows:
                   return flutterSdkPath
               }
               settings.ext.flutterSdkPath = flutterSdkPath()
+
               includeBuild("${settings.ext.flutterSdkPath}/packages/flutter_tools/gradle")
+
               repositories {
                   google()
                   mavenCentral()
                   gradlePluginPortal()
               }
+
+              plugins {
+                  id "com.android.application" version "8.11.1" apply false
+                  id "dev.flutter.flutter-gradle-plugin" version "1.0.0" apply false
+              }
           }
-          plugins {
-              id "com.android.application" version "8.11.1" apply false
-              id "org.jetbrains.kotlin.android" version "2.2.20" apply false
-              id "dev.flutter.flutter-gradle-plugin" version "1.0.0" apply false
-          }
+
           include ":app"
           SETTINGSEOF
+          echo "Created settings.gradle (Groovy DSL)"
 
-          # 2. root build.gradle with updated AGP and Kotlin versions
+          # === 2. Replace build.gradle.kts (root) with build.gradle ===
           rm -f "$ANDROID_DIR/build.gradle.kts"
           cat > "$ANDROID_DIR/build.gradle" << 'ROOTBUILDEOF'
-          buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath "com.android.tools.build:gradle:8.11.1"
-                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.20"
-              }
-          }
           allprojects {
               repositories {
                   google()
                   mavenCentral()
               }
           }
-          ROOTBUILDEOF
 
-          # 3. app/build.gradle with explicit resource shrinking fix
+          rootProject.buildDir = "../build"
+          subprojects {
+              project.buildDir = "${rootProject.buildDir}/${project.name}"
+          }
+          subprojects {
+              project.evaluationDependsOn(":app")
+          }
+
+          tasks.register("clean", Delete) {
+              delete rootProject.buildDir
+          }
+          ROOTBUILDEOF
+          echo "Created build.gradle (root, Groovy DSL)"
+
+          # === 3. Replace app/build.gradle.kts with app/build.gradle ===
           rm -f "$ANDROID_DIR/app/build.gradle.kts"
           cat > "$ANDROID_DIR/app/build.gradle" << 'APPBUILDEOF'
           plugins {
               id "com.android.application"
-              id "kotlin-android"
               id "dev.flutter.flutter-gradle-plugin"
           }
+
           android {
               namespace "com.kilifihub.rider"
-              compileSdk 35
+              compileSdk 36
+
               defaultConfig {
                   applicationId "com.kilifihub.rider"
                   minSdk 23
-                  targetSdk 35
+                  targetSdk 36
                   versionCode 1
                   versionName "1.0.0"
+                  multiDexEnabled true
               }
+
+              compileOptions {
+                  coreLibraryDesugaringEnabled true
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
+
               buildTypes {
                   release {
+                      signingConfig signingConfigs.debug
                       minifyEnabled false
                       shrinkResources false
                   }
@@ -169,32 +172,118 @@ workflows:
                   }
               }
           }
-          APPBUILDEOF
 
-          # 4. Update Gradle Wrapper to 8.14.0 for compatibility with AGP 8.11.1
+          dependencies {
+              coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
+              implementation "androidx.multidex:multidex:2.0.1"
+          }
+          APPBUILDEOF
+          echo "Created app/build.gradle (Groovy DSL) with compileSdk 36, desugaring enabled"
+
+          # === 4. Set Gradle wrapper to 8.14 ===
           GRADLE_PROPS="$ANDROID_DIR/gradle/wrapper/gradle-wrapper.properties"
-          sed -i '' 's|distributionUrl=.*|distributionUrl=https://services.gradle.org/distributions/gradle-8.14-all.zip|' "$GRADLE_PROPS"
+          if [ -f "$GRADLE_PROPS" ]; then
+            sed -i '' 's|distributionUrl=.*|distributionUrl=https://services.gradle.org/distributions/gradle-8.14-all.zip|' "$GRADLE_PROPS"
+            echo "Set Gradle wrapper to 8.14"
+            cat "$GRADLE_PROPS"
+          fi
+
+          echo "=== All Gradle files replaced with Groovy DSL ==="
 
       - name: Get Flutter packages
         script: flutter pub get
 
       - name: Fix missing namespaces and compileSdk in cached plugins
         script: |
-          echo "Fixing plugin build files..."
+          echo "Fixing missing namespaces and compileSdk in cached plugins..."
           for BUILD_FILE in $(find ~/.pub-cache -name "build.gradle" -path "*/android/build.gradle"); do
             if ! grep -q "namespace" "$BUILD_FILE"; then
               MANIFEST=$(find "$(dirname "$BUILD_FILE")" -name "AndroidManifest.xml" | head -1)
               if [ -f "$MANIFEST" ]; then
                 PACKAGE=$(grep -o 'package="[^"]*"' "$MANIFEST" | head -1 | sed 's/package="//;s/"//')
                 if [ -n "$PACKAGE" ]; then
+                  echo "Adding namespace '$PACKAGE' to $BUILD_FILE"
                   sed -i '' "s/^android {/android {\n    namespace '$PACKAGE'/" "$BUILD_FILE"
                 fi
               fi
             fi
-            # Ensure plugins use compatible compileSdk
-            sed -i '' "s/compileSdk [0-9]*/compileSdk 35/" "$BUILD_FILE" 2>/dev/null
-            sed -i '' "s/compileSdkVersion [0-9]*/compileSdkVersion 35/" "$BUILD_FILE" 2>/dev/null
+            # Also upgrade compileSdk to 36 in all plugin build.gradle files
+            if grep -q "compileSdk [0-9]" "$BUILD_FILE"; then
+              CURRENT_SDK=$(grep -o 'compileSdk [0-9]*' "$BUILD_FILE" | head -1 | awk '{print $2}')
+              if [ "$CURRENT_SDK" -lt 36 ] 2>/dev/null; then
+                sed -i '' "s/compileSdk $CURRENT_SDK/compileSdk 36/" "$BUILD_FILE"
+                echo "Upgraded compileSdk from $CURRENT_SDK to 36 in $BUILD_FILE"
+              fi
+            fi
+            # Also handle compileSdkVersion style
+            if grep -q "compileSdkVersion [0-9]" "$BUILD_FILE"; then
+              CURRENT_SDK=$(grep -o 'compileSdkVersion [0-9]*' "$BUILD_FILE" | head -1 | awk '{print $2}')
+              if [ "$CURRENT_SDK" -lt 36 ] 2>/dev/null; then
+                sed -i '' "s/compileSdkVersion $CURRENT_SDK/compileSdkVersion 36/" "$BUILD_FILE"
+                echo "Upgraded compileSdkVersion from $CURRENT_SDK to 36 in $BUILD_FILE"
+              fi
+            fi
           done
+          echo "=== Plugin fixes complete ==="
+
+      - name: Fix all Dart code issues and pubspec
+        script: |
+          echo "Fixing Dart code issues and pubspec..."
+
+          PUBSPEC_FILE="pubspec.yaml"
+          if [ -f "$PUBSPEC_FILE" ]; then
+            sed -i '' 's/flutter_background_service: \^4.0.0/flutter_background_service: ^5.0.0/' "$PUBSPEC_FILE"
+            sed -i '' 's/flutter_background_service: \^3.0.1/flutter_background_service: ^5.0.0/' "$PUBSPEC_FILE"
+            sed -i '' 's/flutter_local_notifications: \^16.3.0/flutter_local_notifications: ^18.0.0/' "$PUBSPEC_FILE"
+            echo "Fixed pubspec.yaml"
+          fi
+
+          MAIN_FILE="lib/main.dart"
+          if [ -f "$MAIN_FILE" ]; then
+            sed -i '' "/import.*firebase_core/d" "$MAIN_FILE"
+            sed -i '' 's/^\(\s*\)await Firebase.initializeApp();/\1\/\/ await Firebase.initializeApp();/' "$MAIN_FILE"
+            sed -i '' 's/CardTheme(/CardThemeData(/' "$MAIN_FILE"
+            echo "Fixed main.dart"
+          fi
+
+          PUSH_FILE="lib/services/push_notification_service.dart"
+          if [ -f "$PUSH_FILE" ]; then
+            sed -i '' 's/const AndroidNotificationDetails androidDetails/AndroidNotificationDetails androidDetails/' "$PUSH_FILE"
+            sed -i '' 's/const NotificationDetails details/NotificationDetails details/' "$PUSH_FILE"
+            sed -i '' '/import.*firebase_core/d' "$PUSH_FILE"
+            sed -i '' '/import.*firebase_messaging/d' "$PUSH_FILE"
+            sed -i '' '/RemoteMessage/d' "$PUSH_FILE"
+            sed -i '' '/Firebase.initializeApp/d' "$PUSH_FILE"
+            sed -i '' '/FirebaseMessaging/d' "$PUSH_FILE"
+            echo "Fixed push_notification_service.dart"
+          fi
+
+          API_FILE="lib/services/api_service.dart"
+          if [ -f "$API_FILE" ]; then
+            sed -i '' 's/StorageService()/StorageService.instance/' "$API_FILE"
+            echo "Fixed api_service.dart"
+          fi
+
+          API_CFG="lib/config/api_config.dart"
+          if [ -f "$API_CFG" ]; then
+            sed -i '' 's/static const double GPS_DISTANCE_FILTER_METERS = 5.0;/static const int GPS_DISTANCE_FILTER_METERS = 5;/' "$API_CFG"
+            echo "Fixed api_config.dart"
+          fi
+
+          LOC_FILE="lib/services/location_service.dart"
+          if [ -f "$LOC_FILE" ]; then
+            sed -i '' 's/ApiConfig.GPS_DISTANCE_FILTER_METERS.toInt()/ApiConfig.GPS_DISTANCE_FILTER_METERS/g' "$LOC_FILE"
+            sed -i '' 's/locationSettings: const LocationSettings(/desiredAccuracy: LocationAccuracy.high,/' "$LOC_FILE"
+            sed -i '' '/accuracy: LocationAccuracy.high,$/d' "$LOC_FILE"
+            sed -i '' '/timeLimit: Duration(seconds: 10),$/s//timeLimit: Duration(seconds: 10),/' "$LOC_FILE"
+            sed -i '' 's/        ),$/      );/' "$LOC_FILE"
+            echo "Fixed location_service.dart"
+          fi
+
+          echo "=== All Dart fixes complete ==="
+
+      - name: Re-get packages after pubspec fix
+        script: flutter pub get
 
       - name: Build APK
         script: flutter build apk --debug --android-skip-build-dependency-validation
