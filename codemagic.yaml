@@ -5,7 +5,7 @@ workflows:
     instance_type: mac_mini_m2
 
     environment:
-      flutter: stable
+      flutter: 3.24.6
 
     triggering:
       events:
@@ -66,118 +66,6 @@ workflows:
               </application>
           </manifest>
           MANIFESTEOF
-
-          # Write app build.gradle with desugaring enabled
-          cat > /tmp/fresh_project/android/app/build.gradle << 'GRADLEEOF'
-          plugins {
-              id "com.android.application"
-              id "kotlin-android"
-              id "dev.flutter.flutter-gradle-plugin"
-          }
-
-          def localProperties = new Properties()
-          def localPropertiesFile = rootProject.file('local.properties')
-          if (localPropertiesFile.exists()) {
-              localPropertiesFile.withReader('UTF-8') { reader ->
-                  localProperties.load(reader)
-              }
-          }
-
-          def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
-          if (flutterVersionCode == null) {
-              flutterVersionCode = '1'
-          }
-
-          def flutterVersionName = localProperties.getProperty('flutter.versionName')
-          if (flutterVersionName == null) {
-              flutterVersionName = '1.0'
-          }
-
-          android {
-              namespace "com.kilifihub.rider"
-              compileSdk 36
-
-              compileOptions {
-                  coreLibraryDesugaringEnabled true
-                  sourceCompatibility JavaVersion.VERSION_1_8
-                  targetCompatibility JavaVersion.VERSION_1_8
-              }
-
-              kotlinOptions {
-                  jvmTarget = '1.8'
-              }
-
-              sourceSets {
-                  main.java.srcDirs += 'src/main/kotlin'
-              }
-
-              defaultConfig {
-                  applicationId "com.kilifihub.rider"
-                  minSdk 23
-                  targetSdk 36
-                  versionCode flutterVersionCode.toInteger()
-                  versionName flutterVersionName
-                  multiDexEnabled true
-              }
-
-              buildTypes {
-                  release {
-                      signingConfig signingConfigs.debug
-                      minifyEnabled false
-                      shrinkResources false
-                  }
-                  debug {
-                      signingConfig signingConfigs.debug
-                      minifyEnabled false
-                  }
-              }
-          }
-
-          flutter {
-              source '../..'
-          }
-
-          dependencies {
-              coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
-          }
-          GRADLEEOF
-
-          # Write root build.gradle with compileSdk override for all plugins
-          cat > /tmp/fresh_project/android/build.gradle << 'ROOTGRADLEEOF'
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-
-          rootProject.buildDir = '../build'
-
-          subprojects {
-              project.buildDir = "${rootProject.buildDir}/${project.name}"
-
-              // Force compileSdk 36 for all Android library plugins
-              // This fixes plugins like connectivity_plus that have outdated compileSdk
-              project.plugins.whenPluginAdded { plugin ->
-                  if (plugin.class.name == 'com.android.build.gradle.LibraryPlugin') {
-                      project.android.compileSdkVersion 36
-                  }
-              }
-          }
-
-          subprojects {
-              project.evaluationDependsOn(':app')
-          }
-
-          tasks.register("clean", Delete) {
-              delete rootProject.buildDir
-          }
-          ROOTGRADLEEOF
-
-          # Remove conflicting build.gradle.kts files (Flutter 3.24+ creates both)
-          rm -f /tmp/fresh_project/android/build.gradle.kts
-          rm -f /tmp/fresh_project/android/app/build.gradle.kts
-          rm -f /tmp/fresh_project/android/settings.gradle.kts
 
           rm -rf /Users/builder/clone/*
           cp -r /tmp/fresh_project/* /Users/builder/clone/
@@ -268,6 +156,23 @@ workflows:
 
       - name: Re-get packages after pubspec fix
         script: flutter pub get
+
+      - name: Patch build files for desugaring and compileSdk
+        script: |
+          echo "Patching app build.gradle for desugaring..."
+
+          # Add desugaring to app build.gradle
+          APP_BUILD="android/app/build.gradle"
+          if [ -f "$APP_BUILD" ]; then
+            # Add coreLibraryDesugaringEnabled to compileOptions
+            sed -i '' '/sourceCompatibility JavaVersion.VERSION_1_8/i\
+                  coreLibraryDesugaringEnabled true' "$APP_BUILD"
+
+            # Add desugaring dependency
+            echo "    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'" >> "$APP_BUILD"
+
+            echo "Patched app build.gradle"
+          fi
 
       - name: Build APK
         script: flutter build apk --debug
