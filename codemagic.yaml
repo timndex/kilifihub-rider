@@ -100,15 +100,15 @@ workflows:
               }
 
               plugins {
-                  id "com.android.application" version "8.7.0" apply false
-                  id "org.jetbrains.kotlin.android" version "2.0.0" apply false
+                  id "com.android.application" version "8.11.1" apply false
+                  id "org.jetbrains.kotlin.android" version "2.2.20" apply false
                   id "dev.flutter.flutter-gradle-plugin" version "1.0.0" apply false
               }
           }
 
           include ":app"
           SETTINGSEOF
-          echo "Created settings.gradle (Groovy DSL) with AGP 8.7.0"
+          echo "Created settings.gradle (Groovy DSL) with AGP 8.11.1"
 
           # === 2. Replace build.gradle.kts (root) with build.gradle ===
           rm -f "$ANDROID_DIR/build.gradle.kts"
@@ -119,8 +119,8 @@ workflows:
                   mavenCentral()
               }
               dependencies {
-                  classpath "com.android.tools.build:gradle:8.7.0"
-                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.0"
+                  classpath "com.android.tools.build:gradle:8.11.1"
+                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.20"
               }
           }
 
@@ -156,12 +156,12 @@ workflows:
 
           android {
               namespace "com.kilifihub.rider"
-              compileSdk 36
+              compileSdk 35
 
               defaultConfig {
                   applicationId "com.kilifihub.rider"
                   minSdk 23
-                  targetSdk 36
+                  targetSdk 35
                   versionCode 1
                   versionName "1.0.0"
                   multiDexEnabled true
@@ -181,9 +181,11 @@ workflows:
                   release {
                       signingConfig signingConfigs.debug
                       minifyEnabled false
+                      shrinkResources false
                   }
                   debug {
                       minifyEnabled false
+                      shrinkResources false
                   }
               }
           }
@@ -193,13 +195,13 @@ workflows:
               implementation "androidx.multidex:multidex:2.0.1"
           }
           APPBUILDEOF
-          echo "Created app/build.gradle (Groovy DSL) with compileSdk 36, desugaring enabled"
+          echo "Created app/build.gradle (Groovy DSL) with compileSdk 35 and shrinkResources disabled"
 
-          # === 4. Downgrade Gradle wrapper to 8.11.1 ===
+          # === 4. Upgrade Gradle wrapper to 8.14.0 ===
           GRADLE_PROPS="$ANDROID_DIR/gradle/wrapper/gradle-wrapper.properties"
           if [ -f "$GRADLE_PROPS" ]; then
-            sed -i '' 's|distributionUrl=.*|distributionUrl=https://services.gradle.org/distributions/gradle-8.11.1-all.zip|' "$GRADLE_PROPS"
-            echo "Downgraded Gradle wrapper to 8.11.1"
+            sed -i '' 's|distributionUrl=.*|distributionUrl=https://services.gradle.org/distributions/gradle-8.14-all.zip|' "$GRADLE_PROPS"
+            echo "Upgraded Gradle wrapper to 8.14.0"
             cat "$GRADLE_PROPS"
           fi
 
@@ -222,20 +224,17 @@ workflows:
                 fi
               fi
             fi
-            # Also upgrade compileSdk to 36 in all plugin build.gradle files
+            # Upgrade compileSdk in plugin build.gradle files
             if grep -q "compileSdk [0-9]" "$BUILD_FILE"; then
               CURRENT_SDK=$(grep -o 'compileSdk [0-9]*' "$BUILD_FILE" | head -1 | awk '{print $2}')
-              if [ "$CURRENT_SDK" -lt 36 ] 2>/dev/null; then
-                sed -i '' "s/compileSdk $CURRENT_SDK/compileSdk 36/" "$BUILD_FILE"
-                echo "Upgraded compileSdk from $CURRENT_SDK to 36 in $BUILD_FILE"
+              if [ "$CURRENT_SDK" -lt 35 ] 2>/dev/null; then
+                sed -i '' "s/compileSdk $CURRENT_SDK/compileSdk 35/" "$BUILD_FILE"
               fi
             fi
-            # Also handle compileSdkVersion style
             if grep -q "compileSdkVersion [0-9]" "$BUILD_FILE"; then
               CURRENT_SDK=$(grep -o 'compileSdkVersion [0-9]*' "$BUILD_FILE" | head -1 | awk '{print $2}')
-              if [ "$CURRENT_SDK" -lt 36 ] 2>/dev/null; then
-                sed -i '' "s/compileSdkVersion $CURRENT_SDK/compileSdkVersion 36/" "$BUILD_FILE"
-                echo "Upgraded compileSdkVersion from $CURRENT_SDK to 36 in $BUILD_FILE"
+              if [ "$CURRENT_SDK" -lt 35 ] 2>/dev/null; then
+                sed -i '' "s/compileSdkVersion $CURRENT_SDK/compileSdkVersion 35/" "$BUILD_FILE"
               fi
             fi
           done
@@ -295,16 +294,13 @@ workflows:
             echo "Fixed location_service.dart"
           fi
 
-          echo "=== All Dart fixes complete ==="
+          echo "=== All Dart fixes complete === "
 
       - name: Re-get packages after pubspec fix
         script: flutter pub get
 
       - name: Build APK
-        script: |
-          # Add gradle.properties to disable new AGP DSL (prevents AGP 9 warnings)
-          echo "android.newDsl=false" >> android/gradle.properties
-          flutter build apk --debug
+        script: flutter build apk --debug --android-skip-build-dependency-validation
 
     artifacts:
       - build/**/outputs/apk/**/*.apk
