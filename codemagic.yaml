@@ -142,6 +142,40 @@ workflows:
           }
           GRADLEEOF
 
+          # Write root build.gradle with subproject compileSdk override
+          cat > /tmp/fresh_project/android/build.gradle << 'ROOTGRADLEEOF'
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.buildDir = '../build'
+
+          subprojects {
+              project.buildDir = "${rootProject.buildDir}/${project.name}"
+          }
+
+          subprojects {
+              project.evaluationDependsOn(':app')
+          }
+
+          // Force all subprojects (plugins) to use compileSdk 36
+          // This fixes plugins like connectivity_plus that have outdated compileSdk
+          subprojects {
+              afterEvaluate { sub ->
+                  if (sub.hasProperty('android')) {
+                      sub.android.compileSdkVersion 36
+                  }
+              }
+          }
+
+          tasks.register("clean", Delete) {
+              delete rootProject.buildDir
+          }
+          ROOTGRADLEEOF
+
           rm -rf /Users/builder/clone/*
           cp -r /tmp/fresh_project/* /Users/builder/clone/
           cp -r /tmp/fresh_project/.* /Users/builder/clone/ 2>/dev/null || true
@@ -150,11 +184,10 @@ workflows:
       - name: Get Flutter packages
         script: flutter pub get
 
-      - name: Fix missing namespaces and compileSdk in cached plugins
+      - name: Fix missing namespaces in cached plugins
         script: |
-          echo "Fixing missing namespaces and outdated compileSdk in cached plugins..."
+          echo "Fixing missing namespaces in cached plugins..."
           for BUILD_FILE in $(find ~/.pub-cache -name "build.gradle" -path "*/android/build.gradle"); do
-            # Fix missing namespace
             if ! grep -q "namespace" "$BUILD_FILE"; then
               MANIFEST=$(find "$(dirname "$BUILD_FILE")" -name "AndroidManifest.xml" | head -1)
               if [ -f "$MANIFEST" ]; then
@@ -165,16 +198,8 @@ workflows:
                 fi
               fi
             fi
-            # Fix outdated compileSdk (anything less than 36 upgrade to 36)
-            if grep -q "compileSdk 33\|compileSdk 34\|compileSdk 35" "$BUILD_FILE"; then
-              OLD_SDK=$(grep -o 'compileSdk [0-9]*' "$BUILD_FILE" | head -1)
-              echo "Upgrading $OLD_SDK to compileSdk 36 in $BUILD_FILE"
-              sed -i '' 's/compileSdk 33/compileSdk 36/' "$BUILD_FILE"
-              sed -i '' 's/compileSdk 34/compileSdk 36/' "$BUILD_FILE"
-              sed -i '' 's/compileSdk 35/compileSdk 36/' "$BUILD_FILE"
-            fi
           done
-          echo "=== Plugin fixes complete ==="
+          echo "=== Namespace fix complete ==="
 
       - name: Fix all Dart code issues and pubspec
         script: |
