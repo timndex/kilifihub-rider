@@ -5,7 +5,7 @@ workflows:
     instance_type: mac_mini_m2
 
     environment:
-      flutter: 3.24.6
+      flutter: stable
 
     triggering:
       events:
@@ -96,7 +96,6 @@ workflows:
         script: |
           echo "Fixing Dart code issues and pubspec..."
 
-          # ---- pubspec.yaml - upgrade packages for latest Flutter/Android ----
           PUBSPEC_FILE="pubspec.yaml"
           if [ -f "$PUBSPEC_FILE" ]; then
             sed -i '' 's/flutter_background_service: \^4.0.0/flutter_background_service: ^5.0.0/' "$PUBSPEC_FILE"
@@ -105,7 +104,6 @@ workflows:
             echo "Fixed pubspec.yaml"
           fi
 
-          # ---- main.dart ----
           MAIN_FILE="lib/main.dart"
           if [ -f "$MAIN_FILE" ]; then
             sed -i '' "/import.*firebase_core/d" "$MAIN_FILE"
@@ -114,7 +112,6 @@ workflows:
             echo "Fixed main.dart"
           fi
 
-          # ---- push_notification_service.dart ----
           PUSH_FILE="lib/services/push_notification_service.dart"
           if [ -f "$PUSH_FILE" ]; then
             sed -i '' 's/const AndroidNotificationDetails androidDetails/AndroidNotificationDetails androidDetails/' "$PUSH_FILE"
@@ -127,21 +124,18 @@ workflows:
             echo "Fixed push_notification_service.dart"
           fi
 
-          # ---- api_service.dart ----
           API_FILE="lib/services/api_service.dart"
           if [ -f "$API_FILE" ]; then
             sed -i '' 's/StorageService()/StorageService.instance/' "$API_FILE"
             echo "Fixed api_service.dart"
           fi
 
-          # ---- api_config.dart ----
           API_CFG="lib/config/api_config.dart"
           if [ -f "$API_CFG" ]; then
             sed -i '' 's/static const double GPS_DISTANCE_FILTER_METERS = 5.0;/static const int GPS_DISTANCE_FILTER_METERS = 5;/' "$API_CFG"
             echo "Fixed api_config.dart"
           fi
 
-          # ---- location_service.dart ----
           LOC_FILE="lib/services/location_service.dart"
           if [ -f "$LOC_FILE" ]; then
             sed -i '' 's/ApiConfig.GPS_DISTANCE_FILTER_METERS.toInt()/ApiConfig.GPS_DISTANCE_FILTER_METERS/g' "$LOC_FILE"
@@ -159,20 +153,86 @@ workflows:
 
       - name: Patch build files for desugaring and compileSdk
         script: |
-          echo "Patching app build.gradle for desugaring..."
+          echo "Patching build files using Python..."
 
-          # Add desugaring to app build.gradle
-          APP_BUILD="android/app/build.gradle"
-          if [ -f "$APP_BUILD" ]; then
-            # Add coreLibraryDesugaringEnabled to compileOptions
-            sed -i '' '/sourceCompatibility JavaVersion.VERSION_1_8/i\
-                  coreLibraryDesugaringEnabled true' "$APP_BUILD"
+          python3 << 'PYEOF'
+          import os, glob
 
-            # Add desugaring dependency
-            echo "    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'" >> "$APP_BUILD"
+          # 1. Patch app build.gradle or build.gradle.kts for desugaring
+          for gradle_file in glob.glob("android/app/build.gradle*"):
+              print(f"Patching {gradle_file} for desugaring...")
+              with open(gradle_file, 'r') as f:
+                  content = f.read()
 
-            echo "Patched app build.gradle"
-          fi
+              # Add coreLibraryDesugaringEnabled to compileOptions
+              if 'coreLibraryDesugaringEnabled' not in content:
+                  content = content.replace(
+                      'sourceCompatibility',
+                      'coreLibraryDesugaringEnabled = true\n        sourceCompatibility'
+                  )
+
+              # Add desugaring dependency
+              if 'desugar_jdk_libs' not in content:
+                  if 'dependencies {' in content:
+                      content = content.replace(
+                          'dependencies {',
+                          'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+                      )
+                  else:
+                      # Kotlin DSL format
+                      content = content.replace(
+                          'dependencies {',
+                          'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+                      )
+
+              with open(gradle_file, 'w') as f:
+                  f.write(content)
+              print(f"Patched {gradle_file}")
+
+          # 2. Patch root build.gradle or build.gradle.kts to force compileSdk for all plugins
+          for gradle_file in glob.glob("android/build.gradle*"):
+              print(f"Patching {gradle_file} for compileSdk override...")
+              with open(gradle_file, 'r') as f:
+                  content = f.read()
+
+              if 'compileSdkVersion' not in content:
+                  # Add compileSdk override for all subprojects
+                  override_code = '''
+          subprojects {
+              afterEvaluate { sub ->
+                  if (sub.extensions.findByName("android") != null) {
+                      sub.android.compileSdkVersion 36
+                  }
+              }
+          }
+          '''
+                  content = content + override_code
+
+                  with open(gradle_file, 'w') as f:
+                      f.write(content)
+                  print(f"Patched {gradle_file}")
+
+          # 3. Patch cached plugin build.gradle files for compileSdk
+          pub_cache = os.path.expanduser("~/.pub-cache")
+          for root, dirs, files in os.walk(pub_cache):
+              for fname in files:
+                  if fname == "build.gradle":
+                      fpath = os.path.join(root, fname)
+                      try:
+                          with open(fpath, 'r') as f:
+                              content = f.read()
+                          # Upgrade compileSdk to 36
+                          import re
+                          new_content = re.sub(r'compileSdk\s+\d+', 'compileSdk 36', content)
+                          if new_content != content:
+                              with open(fpath, 'w') as f:
+                                  f.write(new_content)
+                              print(f"Upgraded compileSdk in {fpath}")
+                      except:
+                          pass
+
+          print("=== All Python patches complete ===")
+          PYEOF
 
       - name: Build APK
         script: flutter build apk --debug
