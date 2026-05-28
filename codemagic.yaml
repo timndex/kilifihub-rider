@@ -17,16 +17,14 @@ workflows:
     scripts:
       - name: Create fresh Flutter project and copy our code
         script: |
-          # Use 'rider' as project name to align with your namespace exactly
-          flutter create --org com.kilifihub --project-name rider /tmp/fresh_project
-          
+          flutter create --org com.kilifihub --project-name kilifihub_rider /tmp/fresh_project
           cp -r lib/ /tmp/fresh_project/lib/
           cp pubspec.yaml /tmp/fresh_project/pubspec.yaml
           if [ -d "assets" ]; then
             cp -r assets/ /tmp/fresh_project/assets/
           fi
 
-          # Write AndroidManifest.xml with correct permissions and package
+          # Write AndroidManifest.xml with our permissions
           cat > /tmp/fresh_project/android/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -72,113 +70,225 @@ workflows:
           rm -rf /Users/builder/clone/*
           cp -r /tmp/fresh_project/* /Users/builder/clone/
           cp -r /tmp/fresh_project/.* /Users/builder/clone/ 2>/dev/null || true
-
-          # FIX: Manually ensure the Kotlin directory matches the package name exactly
-          KOTLIN_PATH="/Users/builder/clone/android/app/src/main/kotlin/com/kilifihub/rider"
-          mkdir -p "$KOTLIN_PATH"
-          cat > "$KOTLIN_PATH/MainActivity.kt" << 'KOTLINEOF'
-          package com.kilifihub.rider
-          import io.flutter.embedding.android.FlutterActivity
-          class MainActivity: FlutterActivity() {
-          }
-          KOTLINEOF
-          echo "=== Fresh project and MainActivity setup complete ==="
-
-      - name: Replace Kotlin DSL with Groovy DSL and setup Gradle
-        script: |
-          ANDROID_DIR="/Users/builder/clone/android"
-
-          # 1. Update settings.gradle with SDK path inclusion
-          rm -f "$ANDROID_DIR/settings.gradle.kts"
-          cat > "$ANDROID_DIR/settings.gradle" << 'SETTINGSEOF'
-          pluginManagement {
-              def flutterSdkPath = {
-                  def properties = new Properties()
-                  file("local.properties").withInputStream { properties.load(it) }
-                  def flutterSdkPath = properties.getProperty("flutter.sdk")
-                  assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
-                  return flutterSdkPath
-              }
-              settings.ext.flutterSdkPath = flutterSdkPath()
-              includeBuild("${settings.ext.flutterSdkPath}/packages/flutter_tools/gradle")
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-          plugins {
-              id "com.android.application" version "8.11.1" apply false
-              id "org.jetbrains.kotlin.android" version "2.2.20" apply false
-              id "dev.flutter.flutter-gradle-plugin" version "1.0.0" apply false
-          }
-          include ":app"
-          SETTINGSEOF
-
-          # 2. root build.gradle
-          rm -f "$ANDROID_DIR/build.gradle.kts"
-          cat > "$ANDROID_DIR/build.gradle" << 'ROOTBUILDEOF'
-          buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath "com.android.tools.build:gradle:8.11.1"
-                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.20"
-              }
-          }
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          ROOTBUILDEOF
-
-          # 3. app/build.gradle - FIXED JVM TARGET TO 17
-          rm -f "$ANDROID_DIR/app/build.gradle.kts"
-          cat > "$ANDROID_DIR/app/build.gradle" << 'APPBUILDEOF'
-          plugins {
-              id "com.android.application"
-              id "kotlin-android"
-              id "dev.flutter.flutter-gradle-plugin"
-          }
-          android {
-              namespace "com.kilifihub.rider"
-              compileSdk 35
-              defaultConfig {
-                  applicationId "com.kilifihub.rider"
-                  minSdk 23
-                  targetSdk 35
-                  versionCode 1
-                  versionName "1.0.0"
-              }
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-              buildTypes {
-                  release {
-                      minifyEnabled false
-                      shrinkResources false
-                  }
-                  debug {
-                      minifyEnabled false
-                      shrinkResources false
-                  }
-              }
-          }
-          APPBUILDEOF
-
-          # 4. Update Gradle Wrapper to 8.14.0
-          GRADLE_PROPS="$ANDROID_DIR/gradle/wrapper/gradle-wrapper.properties"
-          sed -i '' 's|distributionUrl=.*|distributionUrl=https://services.gradle.org/distributions/gradle-8.14-all.zip|' "$GRADLE_PROPS"
+          echo "=== Fresh project copied ==="
 
       - name: Get Flutter packages
+        script: flutter pub get
+
+      - name: Patch Gradle files and cached plugins for our requirements
+        script: |
+          echo "=== Patching Gradle files using Python (Kotlin DSL aware) ==="
+
+          python3 << 'PYEOF'
+          import os, glob, re
+
+          def is_kts(filepath):
+              return filepath.endswith('.kts')
+
+          # === 1. Patch app-level build.gradle.kts (or .gradle) ===
+          for gradle_file in glob.glob("android/app/build.gradle*"):
+              kts = is_kts(gradle_file)
+              print(f"Patching {gradle_file} (Kotlin DSL={kts})...")
+
+              with open(gradle_file, 'r') as f:
+                  content = f.read()
+
+              # --- Fix compileSdk ---
+              if kts:
+                  content = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 36', content)
+                  content = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 36', content)
+                  content = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 36', content)
+                  content = re.sub(r'targetSdk\s*=\s*\d+', 'targetSdk = 36', content)
+              else:
+                  content = re.sub(r'compileSdk\s+flutter\.compileSdkVersion', 'compileSdk 36', content)
+                  content = re.sub(r'compileSdk\s+\d+', 'compileSdk 36', content)
+                  content = re.sub(r'targetSdk\s+flutter\.targetSdkVersion', 'targetSdk 36', content)
+                  content = re.sub(r'targetSdk\s+\d+', 'targetSdk 36', content)
+
+              # --- Add desugaring to compileOptions ---
+              if 'isCoreLibraryDesugaringEnabled' not in content and 'coreLibraryDesugaringEnabled' not in content:
+                  if kts:
+                      content = content.replace(
+                          'sourceCompatibility',
+                          'isCoreLibraryDesugaringEnabled = true\n        sourceCompatibility'
+                      )
+                  else:
+                      content = content.replace(
+                          'sourceCompatibility',
+                          'coreLibraryDesugaringEnabled = true\n        sourceCompatibility'
+                      )
+
+              # --- Add desugaring dependency ---
+              if 'desugar_jdk_libs' not in content:
+                  content = content.replace(
+                      'dependencies {',
+                      'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+                  )
+
+              # --- Add shrinkResources false in buildTypes ---
+              if 'shrinkResources' not in content:
+                  if kts:
+                      content = content.replace(
+                          'minifyEnabled = false',
+                          'minifyEnabled = false\n            shrinkResources = false'
+                      )
+                  else:
+                      content = content.replace(
+                          'minifyEnabled false',
+                          'minifyEnabled false\n            shrinkResources false'
+                      )
+
+              # --- Fix JVM target to 17 for both Java and Kotlin ---
+              content = content.replace('JavaVersion.VERSION_1_8', 'JavaVersion.VERSION_17')
+              content = content.replace('jvmTarget = "1.8"', 'jvmTarget = "17"')
+              if kts:
+                  content = content.replace('jvmTarget = "17"', 'jvmTarget = "17"')
+              # Also handle the case where kotlinOptions might not exist
+              if 'kotlinOptions' not in content and 'compileOptions' in content:
+                  # Add kotlinOptions after compileOptions block
+                  content = content.replace(
+                      'targetCompatibility = JavaVersion.VERSION_17\n            }',
+                      'targetCompatibility = JavaVersion.VERSION_17\n        }\n\n        kotlinOptions {\n            jvmTarget = "17"\n        }'
+                  )
+
+              with open(gradle_file, 'w') as f:
+                  f.write(content)
+              print(f"Patched {gradle_file}")
+
+          # === 2. Patch ALL cached plugin build.gradle files for compileSdk and namespace ===
+          pub_cache = os.path.expanduser("~/.pub-cache")
+          patched_count = 0
+          for root, dirs, files in os.walk(pub_cache):
+              for fname in files:
+                  if fname == "build.gradle":
+                      fpath = os.path.join(root, fname)
+                      try:
+                          with open(fpath, 'r') as f:
+                              plugin_content = f.read()
+
+                          changed = False
+
+                          # Upgrade compileSdk
+                          new_content = re.sub(r'compileSdk\s+\d+', 'compileSdk 36', plugin_content)
+                          if new_content != plugin_content:
+                              plugin_content = new_content
+                              changed = True
+
+                          # Upgrade compileSdkVersion style
+                          new_content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 36', plugin_content)
+                          if new_content != plugin_content:
+                              plugin_content = new_content
+                              changed = True
+
+                          # Add namespace if missing
+                          if 'namespace' not in plugin_content:
+                              manifest_dir = os.path.join(os.path.dirname(fpath), 'src', 'main')
+                              manifest_path = os.path.join(manifest_dir, 'AndroidManifest.xml')
+                              if not os.path.exists(manifest_path):
+                                  for search_root, _, search_files in os.walk(os.path.dirname(fpath)):
+                                      if 'AndroidManifest.xml' in search_files:
+                                          manifest_path = os.path.join(search_root, 'AndroidManifest.xml')
+                                          break
+
+                              if os.path.exists(manifest_path):
+                                  with open(manifest_path, 'r') as mf:
+                                      manifest_content = mf.read()
+                                  pkg_match = re.search(r'package="([^"]+)"', manifest_content)
+                                  if pkg_match:
+                                      package_name = pkg_match.group(1)
+                                      plugin_content = plugin_content.replace(
+                                          'android {',
+                                          f"android {{\n    namespace '{package_name}'"
+                                      )
+                                      changed = True
+                                      print(f"Added namespace '{package_name}' to {fpath}")
+
+                          if changed:
+                              with open(fpath, 'w') as f:
+                                  f.write(plugin_content)
+                              patched_count += 1
+                              print(f"Patched {fpath}")
+                      except Exception as e:
+                          print(f"Error patching {fpath}: {e}")
+
+          print(f"Patched {patched_count} plugin build files")
+          print("=== All patches complete ===")
+          PYEOF
+
+      - name: Fix missing namespaces in cached plugins (shell fallback)
+        script: |
+          echo "Fixing missing namespaces in cached plugins..."
+          for BUILD_FILE in $(find ~/.pub-cache -name "build.gradle" -path "*/android/build.gradle"); do
+            if ! grep -q "namespace" "$BUILD_FILE"; then
+              MANIFEST=$(find "$(dirname "$BUILD_FILE")" -name "AndroidManifest.xml" | head -1)
+              if [ -f "$MANIFEST" ]; then
+                PACKAGE=$(grep -o 'package="[^"]*"' "$MANIFEST" | head -1 | sed 's/package="//;s/"//')
+                if [ -n "$PACKAGE" ]; then
+                  echo "Adding namespace '$PACKAGE' to $BUILD_FILE"
+                  sed -i '' "s/^android {/android {\n    namespace '$PACKAGE'/" "$BUILD_FILE"
+                fi
+              fi
+            fi
+          done
+          echo "=== Namespace fix complete ==="
+
+      - name: Fix all Dart code issues and pubspec
+        script: |
+          echo "Fixing Dart code issues and pubspec..."
+
+          PUBSPEC_FILE="pubspec.yaml"
+          if [ -f "$PUBSPEC_FILE" ]; then
+            sed -i '' 's/flutter_background_service: \^4.0.0/flutter_background_service: ^5.0.0/' "$PUBSPEC_FILE"
+            sed -i '' 's/flutter_background_service: \^3.0.1/flutter_background_service: ^5.0.0/' "$PUBSPEC_FILE"
+            sed -i '' 's/flutter_local_notifications: \^16.3.0/flutter_local_notifications: ^18.0.0/' "$PUBSPEC_FILE"
+            echo "Fixed pubspec.yaml"
+          fi
+
+          MAIN_FILE="lib/main.dart"
+          if [ -f "$MAIN_FILE" ]; then
+            sed -i '' "/import.*firebase_core/d" "$MAIN_FILE"
+            sed -i '' 's/^\(\s*\)await Firebase.initializeApp();/\1\/\/ await Firebase.initializeApp();/' "$MAIN_FILE"
+            sed -i '' 's/CardTheme(/CardThemeData(/' "$MAIN_FILE"
+            echo "Fixed main.dart"
+          fi
+
+          PUSH_FILE="lib/services/push_notification_service.dart"
+          if [ -f "$PUSH_FILE" ]; then
+            sed -i '' 's/const AndroidNotificationDetails androidDetails/AndroidNotificationDetails androidDetails/' "$PUSH_FILE"
+            sed -i '' 's/const NotificationDetails details/NotificationDetails details/' "$PUSH_FILE"
+            sed -i '' '/import.*firebase_core/d' "$PUSH_FILE"
+            sed -i '' '/import.*firebase_messaging/d' "$PUSH_FILE"
+            sed -i '' '/RemoteMessage/d' "$PUSH_FILE"
+            sed -i '' '/Firebase.initializeApp/d' "$PUSH_FILE"
+            sed -i '' '/FirebaseMessaging/d' "$PUSH_FILE"
+            echo "Fixed push_notification_service.dart"
+          fi
+
+          API_FILE="lib/services/api_service.dart"
+          if [ -f "$API_FILE" ]; then
+            sed -i '' 's/StorageService()/StorageService.instance/' "$API_FILE"
+            echo "Fixed api_service.dart"
+          fi
+
+          API_CFG="lib/config/api_config.dart"
+          if [ -f "$API_CFG" ]; then
+            sed -i '' 's/static const double GPS_DISTANCE_FILTER_METERS = 5.0;/static const int GPS_DISTANCE_FILTER_METERS = 5;/' "$API_CFG"
+            echo "Fixed api_config.dart"
+          fi
+
+          LOC_FILE="lib/services/location_service.dart"
+          if [ -f "$LOC_FILE" ]; then
+            sed -i '' 's/ApiConfig.GPS_DISTANCE_FILTER_METERS.toInt()/ApiConfig.GPS_DISTANCE_FILTER_METERS/g' "$LOC_FILE"
+            sed -i '' 's/locationSettings: const LocationSettings(/desiredAccuracy: LocationAccuracy.high,/' "$LOC_FILE"
+            sed -i '' '/accuracy: LocationAccuracy.high,$/d' "$LOC_FILE"
+            sed -i '' '/timeLimit: Duration(seconds: 10),$/s//timeLimit: Duration(seconds: 10),/' "$LOC_FILE"
+            sed -i '' 's/        ),$/      );/' "$LOC_FILE"
+            echo "Fixed location_service.dart"
+          fi
+
+          echo "=== All Dart fixes complete ==="
+
+      - name: Re-get packages after pubspec fix
         script: flutter pub get
 
       - name: Build APK
