@@ -93,6 +93,10 @@ workflows:
               with open(gradle_file, 'r') as f:
                   content = f.read()
 
+              print(f"--- ORIGINAL {gradle_file} ---")
+              print(content)
+              print(f"--- END ORIGINAL ---")
+
               # --- Fix compileSdk ---
               if kts:
                   content = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 36', content)
@@ -117,13 +121,23 @@ workflows:
                           'sourceCompatibility',
                           'coreLibraryDesugaringEnabled = true\n        sourceCompatibility'
                       )
+                  print("Added isCoreLibraryDesugaringEnabled")
 
               # --- Add desugaring dependency ---
               if 'desugar_jdk_libs' not in content:
-                  content = content.replace(
-                      'dependencies {',
-                      'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
-                  )
+                  if 'dependencies {' in content:
+                      content = content.replace(
+                          'dependencies {',
+                          'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+                      )
+                      print("Added desugaring dependency to existing dependencies block")
+                  else:
+                      # No dependencies block exists - append one at the end
+                      if kts:
+                          content = content.rstrip() + '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+                      else:
+                          content = content.rstrip() + '\n\ndependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"\n}\n'
+                      print("Appended new dependencies block with desugaring")
 
               # --- Add shrinkResources false in buildTypes ---
               if 'shrinkResources' not in content:
@@ -141,11 +155,8 @@ workflows:
               # --- Fix JVM target to 17 for both Java and Kotlin ---
               content = content.replace('JavaVersion.VERSION_1_8', 'JavaVersion.VERSION_17')
               content = content.replace('jvmTarget = "1.8"', 'jvmTarget = "17"')
-              if kts:
-                  content = content.replace('jvmTarget = "17"', 'jvmTarget = "17"')
-              # Also handle the case where kotlinOptions might not exist
+              # Also handle the case where kotlinOptions might not exist but compileOptions does
               if 'kotlinOptions' not in content and 'compileOptions' in content:
-                  # Add kotlinOptions after compileOptions block
                   content = content.replace(
                       'targetCompatibility = JavaVersion.VERSION_17\n            }',
                       'targetCompatibility = JavaVersion.VERSION_17\n        }\n\n        kotlinOptions {\n            jvmTarget = "17"\n        }'
@@ -153,7 +164,15 @@ workflows:
 
               with open(gradle_file, 'w') as f:
                   f.write(content)
-              print(f"Patched {gradle_file}")
+
+              print(f"--- PATCHED {gradle_file} ---")
+              print(content)
+              print(f"--- END PATCHED ---")
+
+              # Verify critical patches
+              assert 'compileSdk = 36' in content or 'compileSdk 36' in content, "compileSdk 36 not found!"
+              assert 'desugar_jdk_libs' in content, "desugar_jdk_libs dependency not found!"
+              print("VERIFICATION: All critical patches confirmed!")
 
           # === 2. Patch ALL cached plugin build.gradle files for compileSdk and namespace ===
           pub_cache = os.path.expanduser("~/.pub-cache")
