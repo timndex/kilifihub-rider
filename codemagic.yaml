@@ -95,7 +95,7 @@ workflows:
 
           android {
               namespace "com.kilifihub.rider"
-              compileSdk 35
+              compileSdk 36
 
               compileOptions {
                   coreLibraryDesugaringEnabled true
@@ -114,7 +114,7 @@ workflows:
               defaultConfig {
                   applicationId "com.kilifihub.rider"
                   minSdk 23
-                  targetSdk 35
+                  targetSdk 36
                   versionCode flutterVersionCode.toInteger()
                   versionName flutterVersionName
                   multiDexEnabled true
