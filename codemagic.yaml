@@ -101,7 +101,7 @@ workflows:
 
               plugins {
                   id "com.android.application" version "8.7.0" apply false
-                  id "org.jetbrains.kotlin.android" version "1.9.22" apply false
+                  id "org.jetbrains.kotlin.android" version "2.0.0" apply false
                   id "dev.flutter.flutter-gradle-plugin" version "1.0.0" apply false
               }
           }
@@ -120,7 +120,7 @@ workflows:
               }
               dependencies {
                   classpath "com.android.tools.build:gradle:8.7.0"
-                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22"
+                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.0"
               }
           }
 
@@ -301,7 +301,10 @@ workflows:
         script: flutter pub get
 
       - name: Build APK
-        script: flutter build apk --debug
+        script: |
+          # Add gradle.properties to disable new AGP DSL (prevents AGP 9 warnings)
+          echo "android.newDsl=false" >> android/gradle.properties
+          flutter build apk --debug
 
     artifacts:
       - build/**/outputs/apk/**/*.apk
