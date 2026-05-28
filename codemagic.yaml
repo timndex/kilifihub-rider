@@ -70,24 +70,147 @@ workflows:
           rm -rf /Users/builder/clone/*
           cp -r /tmp/fresh_project/* /Users/builder/clone/
           cp -r /tmp/fresh_project/.* /Users/builder/clone/ 2>/dev/null || true
+          echo "=== Fresh project copied ==="
 
-          # Downgrade Gradle wrapper to 8.11.1
-          # Flutter stable (3.44.0) ships Gradle 9.x which is incompatible with current AGP
-          GRADLE_PROPS="/Users/builder/clone/android/gradle/wrapper/gradle-wrapper.properties"
+      - name: Replace Kotlin DSL with Groovy DSL and fix Gradle versions
+        script: |
+          echo "=== Replacing .kts files with .gradle (Groovy DSL) for maximum compatibility ==="
+
+          ANDROID_DIR="/Users/builder/clone/android"
+
+          # === 1. Replace settings.gradle.kts with settings.gradle ===
+          rm -f "$ANDROID_DIR/settings.gradle.kts"
+          cat > "$ANDROID_DIR/settings.gradle" << 'SETTINGSEOF'
+          pluginManagement {
+              def flutterSdkPath = {
+                  def properties = new Properties()
+                  file("local.properties").withInputStream { properties.load(it) }
+                  def flutterSdkPath = properties.getProperty("flutter.sdk")
+                  assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
+                  return flutterSdkPath
+              }
+              settings.ext.flutterSdkPath = flutterSdkPath()
+
+              includeBuild("${settings.ext.flutterSdkPath}/packages/flutter_tools/gradle")
+
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+
+              plugins {
+                  id "com.android.application" version "8.7.0" apply false
+                  id "org.jetbrains.kotlin.android" version "1.9.22" apply false
+                  id "dev.flutter.flutter-gradle-plugin" version "1.0.0" apply false
+              }
+          }
+
+          include ":app"
+          SETTINGSEOF
+          echo "Created settings.gradle (Groovy DSL) with AGP 8.7.0"
+
+          # === 2. Replace build.gradle.kts (root) with build.gradle ===
+          rm -f "$ANDROID_DIR/build.gradle.kts"
+          cat > "$ANDROID_DIR/build.gradle" << 'ROOTBUILDEOF'
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath "com.android.tools.build:gradle:8.7.0"
+                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22"
+              }
+          }
+
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.buildDir = "../build"
+          subprojects {
+              project.buildDir = "${rootProject.buildDir}/${project.name}"
+          }
+          subprojects {
+              project.evaluationDependsOn(":app")
+          }
+
+          tasks.register("clean", Delete) {
+              delete rootProject.buildDir
+          }
+          ROOTBUILDEOF
+          echo "Created build.gradle (root, Groovy DSL)"
+
+          # === 3. Replace app/build.gradle.kts with app/build.gradle ===
+          rm -f "$ANDROID_DIR/app/build.gradle.kts"
+          cat > "$ANDROID_DIR/app/build.gradle" << 'APPBUILDEOF'
+          plugins {
+              id "com.android.application"
+              id "kotlin-android"
+              id "dev.flutter.flutter-gradle-plugin"
+          }
+
+          android {
+              namespace "com.kilifihub.rider"
+              compileSdk 36
+
+              defaultConfig {
+                  applicationId "com.kilifihub.rider"
+                  minSdk 23
+                  targetSdk 36
+                  versionCode 1
+                  versionName "1.0.0"
+                  multiDexEnabled true
+              }
+
+              compileOptions {
+                  coreLibraryDesugaringEnabled true
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
+
+              kotlinOptions {
+                  jvmTarget = "1.8"
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.debug
+                      minifyEnabled false
+                  }
+                  debug {
+                      minifyEnabled false
+                  }
+              }
+          }
+
+          dependencies {
+              coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
+              implementation "androidx.multidex:multidex:2.0.1"
+          }
+          APPBUILDEOF
+          echo "Created app/build.gradle (Groovy DSL) with compileSdk 36, desugaring enabled"
+
+          # === 4. Downgrade Gradle wrapper to 8.11.1 ===
+          GRADLE_PROPS="$ANDROID_DIR/gradle/wrapper/gradle-wrapper.properties"
           if [ -f "$GRADLE_PROPS" ]; then
             sed -i '' 's|distributionUrl=.*|distributionUrl=https://services.gradle.org/distributions/gradle-8.11.1-all.zip|' "$GRADLE_PROPS"
             echo "Downgraded Gradle wrapper to 8.11.1"
             cat "$GRADLE_PROPS"
           fi
 
-          echo "=== Fresh project ready ==="
+          echo "=== All Gradle files replaced with Groovy DSL ==="
 
       - name: Get Flutter packages
         script: flutter pub get
 
-      - name: Fix missing namespaces in cached plugins
+      - name: Fix missing namespaces and compileSdk in cached plugins
         script: |
-          echo "Fixing missing namespaces in cached plugins..."
+          echo "Fixing missing namespaces and compileSdk in cached plugins..."
           for BUILD_FILE in $(find ~/.pub-cache -name "build.gradle" -path "*/android/build.gradle"); do
             if ! grep -q "namespace" "$BUILD_FILE"; then
               MANIFEST=$(find "$(dirname "$BUILD_FILE")" -name "AndroidManifest.xml" | head -1)
@@ -99,8 +222,24 @@ workflows:
                 fi
               fi
             fi
+            # Also upgrade compileSdk to 36 in all plugin build.gradle files
+            if grep -q "compileSdk [0-9]" "$BUILD_FILE"; then
+              CURRENT_SDK=$(grep -o 'compileSdk [0-9]*' "$BUILD_FILE" | head -1 | awk '{print $2}')
+              if [ "$CURRENT_SDK" -lt 36 ] 2>/dev/null; then
+                sed -i '' "s/compileSdk $CURRENT_SDK/compileSdk 36/" "$BUILD_FILE"
+                echo "Upgraded compileSdk from $CURRENT_SDK to 36 in $BUILD_FILE"
+              fi
+            fi
+            # Also handle compileSdkVersion style
+            if grep -q "compileSdkVersion [0-9]" "$BUILD_FILE"; then
+              CURRENT_SDK=$(grep -o 'compileSdkVersion [0-9]*' "$BUILD_FILE" | head -1 | awk '{print $2}')
+              if [ "$CURRENT_SDK" -lt 36 ] 2>/dev/null; then
+                sed -i '' "s/compileSdkVersion $CURRENT_SDK/compileSdkVersion 36/" "$BUILD_FILE"
+                echo "Upgraded compileSdkVersion from $CURRENT_SDK to 36 in $BUILD_FILE"
+              fi
+            fi
           done
-          echo "=== Namespace fix complete ==="
+          echo "=== Plugin fixes complete ==="
 
       - name: Fix all Dart code issues and pubspec
         script: |
@@ -156,178 +295,10 @@ workflows:
             echo "Fixed location_service.dart"
           fi
 
-          echo "=== All fixes complete ==="
+          echo "=== All Dart fixes complete ==="
 
       - name: Re-get packages after pubspec fix
         script: flutter pub get
-
-      - name: Patch build files for desugaring and compileSdk
-        script: |
-          echo "Patching build files using Python..."
-
-          python3 << 'PYEOF'
-          import os, glob, re
-
-          def is_kts(filepath):
-              """Check if a Gradle file uses Kotlin DSL (.kts)"""
-              return filepath.endswith('.kts')
-
-          # 1. Patch app-level build.gradle or build.gradle.kts
-          for gradle_file in glob.glob("android/app/build.gradle*"):
-              kts = is_kts(gradle_file)
-              print(f"Patching {gradle_file} (Kotlin DSL={kts}) for desugaring and compileSdk...")
-              with open(gradle_file, 'r') as f:
-                  content = f.read()
-
-              # --- Fix compileSdk ---
-              if kts:
-                  # Kotlin DSL: compileSdk = 36 or compileSdk = flutter.compileSdkVersion
-                  content = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 36', content)
-                  content = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 36', content)
-                  # Also fix targetSdk
-                  content = re.sub(r'targetSdk\s*=\s*\d+', 'targetSdk = 36', content)
-                  content = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 36', content)
-              else:
-                  # Groovy DSL: compileSdk 34 or compileSdk flutter.compileSdkVersion
-                  content = re.sub(r'compileSdk\s+\d+', 'compileSdk 36', content)
-                  content = re.sub(r'compileSdk\s+flutter\.compileSdkVersion', 'compileSdk 36', content)
-                  content = re.sub(r'targetSdk\s+\d+', 'targetSdk 36', content)
-                  content = re.sub(r'targetSdk\s+flutter\.targetSdkVersion', 'targetSdk 36', content)
-
-              # --- Add coreLibraryDesugaringEnabled ---
-              if 'coreLibraryDesugaringEnabled' not in content and 'isCoreLibraryDesugaringEnabled' not in content:
-                  if kts:
-                      # Kotlin DSL: isCoreLibraryDesugaringEnabled = true
-                      content = content.replace(
-                          'sourceCompatibility',
-                          'isCoreLibraryDesugaringEnabled = true\n        sourceCompatibility'
-                      )
-                  else:
-                      # Groovy DSL: coreLibraryDesugaringEnabled = true
-                      content = content.replace(
-                          'sourceCompatibility',
-                          'coreLibraryDesugaringEnabled = true\n        sourceCompatibility'
-                      )
-
-              # --- Add desugaring dependency ---
-              if 'desugar_jdk_libs' not in content:
-                  if 'dependencies {' in content:
-                      content = content.replace(
-                          'dependencies {',
-                          'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
-                      )
-
-              with open(gradle_file, 'w') as f:
-                  f.write(content)
-              print(f"Patched {gradle_file}")
-
-          # 2. Patch ROOT build.gradle or build.gradle.kts
-          # Remove any broken subprojects block with Groovy syntax in .kts files
-          for gradle_file in glob.glob("android/build.gradle*"):
-              print(f"Checking {gradle_file}...")
-              with open(gradle_file, 'r') as f:
-                  content = f.read()
-              # Remove any broken subprojects block with Groovy syntax in .kts files
-              if 'sub.android.compileSdkVersion' in content or 'compileSdkVersion' in content:
-                  content = re.sub(
-                      r'\n*subprojects\s*\{[^}]*\}\s*',
-                      '',
-                      content,
-                      flags=re.DOTALL
-                  )
-                  with open(gradle_file, 'w') as f:
-                      f.write(content)
-                  print(f"Cleaned subprojects block from {gradle_file}")
-              else:
-                  print(f"Root file OK, no changes needed")
-
-          # 2b. Patch settings.gradle.kts AGP version for Gradle 8.11.1 compatibility
-          # AGP 8.9.0+ requires Gradle 8.11.1+, so we cap AGP at 8.9.0
-          for settings_file in glob.glob("android/settings.gradle*"):
-              print(f"Checking AGP version in {settings_file}...")
-              with open(settings_file, 'r') as f:
-                  content = f.read()
-              # Find AGP version and ensure it's <= 8.9.0 for Gradle 8.11.1 compat
-              agp_match = re.search(r'com\.android\.application.*?version\s*["\']?(\d+\.\d+\.\d+)', content)
-              if agp_match:
-                  agp_version = agp_match.group(1)
-                  major, minor, patch = map(int, agp_version.split('.'))
-                  print(f"Found AGP version: {agp_version}")
-                  if major > 8 or (major == 8 and minor > 9):
-                      # Cap at 8.9.0 for Gradle 8.11.1 compatibility
-                      new_version = "8.9.0"
-                      content = content.replace(agp_version, new_version)
-                      with open(settings_file, 'w') as f:
-                          f.write(content)
-                      print(f"Downgraded AGP from {agp_version} to {new_version} in {settings_file}")
-                  else:
-                      print(f"AGP version {agp_version} is compatible with Gradle 8.11.1")
-              else:
-                  print(f"No AGP version found in {settings_file}")
-
-          # 3. Patch ALL cached plugin build.gradle files for compileSdk and namespace
-          pub_cache = os.path.expanduser("~/.pub-cache")
-          patched_count = 0
-          for root, dirs, files in os.walk(pub_cache):
-              for fname in files:
-                  if fname.startswith("build.gradle"):
-                      fpath = os.path.join(root, fname)
-                      try:
-                          with open(fpath, 'r') as f:
-                              plugin_content = f.read()
-
-                          changed = False
-
-                          # Upgrade compileSdk to 36
-                          if is_kts(fpath):
-                              new_content = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 36', plugin_content)
-                          else:
-                              new_content = re.sub(r'compileSdk\s+\d+', 'compileSdk 36', plugin_content)
-                          if new_content != plugin_content:
-                              plugin_content = new_content
-                              changed = True
-
-                          # Also force compileSdkVersion style
-                          new_content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 36', plugin_content)
-                          if new_content != plugin_content:
-                              plugin_content = new_content
-                              changed = True
-
-                          # Add namespace if missing (AGP 8+ requirement)
-                          if 'namespace' not in plugin_content:
-                              manifest_dir = os.path.join(os.path.dirname(fpath), 'src', 'main')
-                              manifest_path = os.path.join(manifest_dir, 'AndroidManifest.xml')
-                              # Try finding manifest in various locations
-                              if not os.path.exists(manifest_path):
-                                  for search_root, _, search_files in os.walk(os.path.dirname(fpath)):
-                                      if 'AndroidManifest.xml' in search_files:
-                                          manifest_path = os.path.join(search_root, 'AndroidManifest.xml')
-                                          break
-
-                              if os.path.exists(manifest_path):
-                                  with open(manifest_path, 'r') as mf:
-                                      manifest_content = mf.read()
-                                  pkg_match = re.search(r'package="([^"]+)"', manifest_content)
-                                  if pkg_match:
-                                      package_name = pkg_match.group(1)
-                                      plugin_content = plugin_content.replace(
-                                          'android {',
-                                          f"android {{\n    namespace '{package_name}'"
-                                      )
-                                      changed = True
-                                      print(f"Added namespace '{package_name}' to {fpath}")
-
-                          if changed:
-                              with open(fpath, 'w') as f:
-                                  f.write(plugin_content)
-                              patched_count += 1
-                              print(f"Patched {fpath}")
-                      except Exception as e:
-                          print(f"Error patching {fpath}: {e}")
-
-          print(f"Patched {patched_count} plugin build files")
-          print("=== All Python patches complete ===")
-          PYEOF
 
       - name: Build APK
         script: flutter build apk --debug
