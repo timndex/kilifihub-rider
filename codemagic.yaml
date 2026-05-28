@@ -156,6 +156,25 @@ workflows:
       - name: Re-get packages after pubspec fix
         script: flutter pub get
 
+      - name: Enable core library desugaring
+        script: |
+          echo "Enabling core library desugaring in app build.gradle..."
+          APP_BUILD="android/app/build.gradle"
+
+          if [ -f "$APP_BUILD" ]; then
+            # Add coreLibraryDesugaringEnabled true inside compileOptions block
+            sed -i '' 's/sourceCompatibility JavaVersion.VERSION_1_8/sourceCompatibility JavaVersion.VERSION_1_8\n        coreLibraryDesugaringEnabled true/' "$APP_BUILD"
+
+            # Add desugaring dependency
+            sed -i '' '/dependencies {/a\
+              coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
+          ' "$APP_BUILD"
+
+            echo "Desugaring enabled"
+          else
+            echo "WARNING: android/app/build.gradle not found"
+          fi
+
       - name: Build APK
         script: flutter build apk --debug
 
