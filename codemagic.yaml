@@ -1,38 +1,1537 @@
-The following plugins do not support Swift Package Manager for ios:
-  - flutter_local_notifications
-  - flutter_background_service_ios
-  - connectivity_plus
-This will become an error in a future version of Flutter. Please contact the plugin maintainers to request Swift Package Manager adoption.
-The following plugins do not support Swift Package Manager for macos:
-  - flutter_local_notifications
-  - connectivity_plus
-This will become an error in a future version of Flutter. Please contact the plugin maintainers to request Swift Package Manager adoption.
-Running Gradle task 'assembleDebug'...                          
-e: file:///Users/builder/clone/android/build.gradle.kts:27:5: Unresolved reference 'classpath'.
+workflows:
+  android-apk:
+    name: KilifiHub Rider Android APK
+    max_build_duration: 30
+    instance_type: mac_mini_m2
 
-FAILURE: Build failed with an exception.
+    environment:
+      flutter: stable
+      # ============================================================
+      # Firebase config - set these as environment variables in
+      # Codemagic UI → App Settings → Environment variables
+      # ============================================================
+      # GOOGLE_SERVICES_JSON: (paste entire google-services.json content)
+      # FIREBASE_ANDROID_API_KEY: AIzaSy...
+      # FIREBASE_ANDROID_APP_ID: 1:123456789:android:abc123
+      # FIREBASE_MESSAGING_SENDER_ID: 123456789
+      # FIREBASE_PROJECT_ID: kilifihub-rider
+      # FIREBASE_STORAGE_BUCKET: kilifihub-rider.appspot.com
 
-* Where:
-Build file '/Users/builder/clone/android/build.gradle.kts' line: 27
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
 
-* What went wrong:
-Script compilation error:
+    scripts:
+      - name: Create fresh Flutter project and copy our code
+        script: |
+          flutter create --org com.kilifihub --project-name kilifihub_rider /tmp/fresh_project
+          cp -r lib/ /tmp/fresh_project/lib/
+          cp pubspec.yaml /tmp/fresh_project/pubspec.yaml
+          if [ -d "assets" ]; then
+            cp -r assets/ /tmp/fresh_project/assets/
+          fi
 
-  Line 27:     classpath("com.google.gms:google-services:4.4.2")
-               ^ Unresolved reference 'classpath'.
+          # ============================================================
+          # Write google-services.json from environment variable
+          # This is required for Firebase Auth and FCM to work
+          # ============================================================
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" > /tmp/fresh_project/android/app/google-services.json
+            echo "google-services.json written from environment variable"
+          else
+            echo "WARNING: GOOGLE_SERVICES_JSON not set. Firebase will NOT work."
+            echo "Set it in Codemagic UI → App Settings → Environment variables"
+            # Create a minimal placeholder so the build doesn't fail
+            cat > /tmp/fresh_project/android/app/google-services.json << 'GSEOF'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "placeholder",
+              "storage_bucket": "placeholder.appspot.com"
+            },
+            "client": [{
+              "client_info": {
+                "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+                "android_client_info": { "package_name": "com.kilifihub.kilifihub_rider" }
+              },
+              "api_key": [{ "current_key": "placeholder" }],
+              "services": {
+                "appinvite_service": { "other_platform_oauth_client": [] }
+              }
+            }],
+            "configuration_version": "1"
+          }
+          GSEOF
+          fi
 
-1 error
+          # Write AndroidManifest.xml with our permissions
+          cat > /tmp/fresh_project/android/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <application
+                  android:label="KilifiHub Rider"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/ic_launcher"
+                  android:usesCleartextTraffic="true"
+                  android:networkSecurityConfig="@xml/network_security_config">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <meta-data
+                        android:name="io.flutter.embedding.android.NormalTheme"
+                        android:resource="@style/NormalTheme"
+                        />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <!-- Firebase Messaging Service -->
+                  <service
+                      android:name="com.google.firebase.messaging.FirebaseMessagingService"
+                      android:exported="false">
+                      <intent-filter>
+                          <action android:name="com.google.firebase.MESSAGING_EVENT" />
+                      </intent-filter>
+                  </service>
+                  <!-- Background GPS service -->
+                  <service
+                      android:name="id.flutter.flutter_background_service.BackgroundService"
+                      android:foregroundServiceType="location"
+                      android:exported="false"
+                      android:stopWithTask="false" />
+                  <!-- Boot receiver -->
+                  <receiver
+                      android:name="id.flutter.flutter_background_service.BootReceiver"
+                      android:exported="false">
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                      </intent-filter>
+                  </receiver>
+                  <meta-data
+                      android:name="flutterEmbedding"
+                      android:value="2" />
+              </application>
+          </manifest>
+          MANIFESTEOF
 
-* Try:
-> Run with --stacktrace option to get the stack trace.
-> Run with --info or --debug option to get more log output.
-> Run with --scan to generate a Build Scan (Powered by Develocity).
-> Get more help at https://help.gradle.org.
+          # Write network security config for HTTPS connections
+          mkdir -p /tmp/fresh_project/android/app/src/main/res/xml
+          cat > /tmp/fresh_project/android/app/src/main/res/xml/network_security_config.xml << 'NETSECEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <network-security-config>
+              <domain-config cleartextTrafficPermitted="true">
+                  <domain includeSubdomains="true">ats.unaux.com</domain>
+                  <domain includeSubdomains="true">kilifihub.co.ke</domain>
+                  <domain includeSubdomains="true">10.0.2.2</domain>
+                  <domain includeSubdomains="true">localhost</domain>
+              </domain-config>
+              <base-config cleartextTrafficPermitted="false">
+                  <trust-anchors>
+                      <certificates src="system" />
+                  </trust-anchors>
+              </base-config>
+          </network-security-config>
+          NETSECEOF
 
-BUILD FAILED in 1m 49s
-Running Gradle task 'assembleDebug'...                            110.2s
-Gradle task assembleDebug failed with exit code 1
+          rm -rf /Users/builder/clone/*
+          cp -r /tmp/fresh_project/* /Users/builder/clone/
+          cp -r /tmp/fresh_project/.* /Users/builder/clone/ 2>/dev/null || true
+          echo "=== Fresh project copied ==="
+
+      - name: Get Flutter packages
+        script: flutter pub get
 
 
-Build failed :|
-Step 10 script `Build APK` exited with status code 1
+      - name: Patch Gradle files and cached plugins for our requirements
+        script: |
+          echo "=== Patching Gradle files using Python (Kotlin DSL aware) ==="
+
+          python3 << 'PYEOF'
+          import os, glob, re
+
+          def is_kts(filepath):
+              return filepath.endswith('.kts')
+
+          # === 1. Patch app-level build.gradle.kts (or .gradle) ===
+          for gradle_file in glob.glob("android/app/build.gradle*"):
+              kts = is_kts(gradle_file)
+              print(f"Patching {gradle_file} (Kotlin DSL={kts})...")
+
+              with open(gradle_file, 'r') as f:
+                  content = f.read()
+
+              print(f"--- ORIGINAL {gradle_file} ---")
+              print(content)
+              print(f"--- END ORIGINAL ---")
+
+              # --- Add google-services plugin for Firebase ---
+              if 'com.google.gms.google-services' not in content:
+                  if kts:
+                      # Kotlin DSL: add plugin id to the plugins block (version declared in settings.gradle.kts)
+                      if 'plugins {' in content:
+                          content = re.sub(
+                              r'(plugins\s*\{)',
+                              r'\1\n    id("com.google.gms.google-services")',
+                              content
+                          )
+                      else:
+                          content = 'plugins {\n    id("com.google.gms.google-services")\n}\n' + content
+                      print("Added google-services plugin (Kotlin DSL)")
+                  else:
+                      content = content.replace(
+                          "apply plugin: 'com.android.application'",
+                          "apply plugin: 'com.android.application'\napply plugin: 'com.google.gms.google-services'"
+                      )
+                      if "apply plugin: 'com.android.application'" not in content:
+                          content = "apply plugin: 'com.google.gms.google-services'\n" + content
+                      print("Added google-services plugin (Groovy DSL)")
+
+              # --- Fix compileSdk ---
+              if kts:
+                  content = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 36', content)
+                  content = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 36', content)
+                  content = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 36', content)
+                  content = re.sub(r'targetSdk\s*=\s*\d+', 'targetSdk = 36', content)
+              else:
+                  content = re.sub(r'compileSdk\s+flutter\.compileSdkVersion', 'compileSdk 36', content)
+                  content = re.sub(r'compileSdk\s+\d+', 'compileSdk 36', content)
+                  content = re.sub(r'targetSdk\s+flutter\.targetSdkVersion', 'targetSdk 36', content)
+                  content = re.sub(r'targetSdk\s+\d+', 'targetSdk 36', content)
+
+              # --- Add desugaring to compileOptions ---
+              if 'isCoreLibraryDesugaringEnabled' not in content and 'coreLibraryDesugaringEnabled' not in content:
+                  if kts:
+                      content = content.replace(
+                          'sourceCompatibility',
+                          'isCoreLibraryDesugaringEnabled = true\n        sourceCompatibility'
+                      )
+                  else:
+                      content = content.replace(
+                          'sourceCompatibility',
+                          'coreLibraryDesugaringEnabled = true\n        sourceCompatibility'
+                      )
+                  print("Added isCoreLibraryDesugaringEnabled")
+
+              # --- Add desugaring dependency ---
+              if 'desugar_jdk_libs' not in content:
+                  if 'dependencies {' in content:
+                      content = content.replace(
+                          'dependencies {',
+                          'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+                      )
+                      print("Added desugaring dependency to existing dependencies block")
+                  else:
+                      if kts:
+                          content = content.rstrip() + '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+                      else:
+                          content = content.rstrip() + '\n\ndependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"\n}\n'
+                      print("Appended new dependencies block with desugaring")
+
+              # --- Add shrinkResources false in buildTypes ---
+              if 'shrinkResources' not in content:
+                  if kts:
+                      content = content.replace(
+                          'minifyEnabled = false',
+                          'minifyEnabled = false\n            shrinkResources = false'
+                      )
+                  else:
+                      content = content.replace(
+                          'minifyEnabled false',
+                          'minifyEnabled false\n            shrinkResources false'
+                      )
+
+              # --- Fix JVM target to 17 for both Java and Kotlin ---
+              content = content.replace('JavaVersion.VERSION_1_8', 'JavaVersion.VERSION_17')
+              content = content.replace('jvmTarget = "1.8"', 'jvmTarget = "17"')
+              if 'kotlinOptions' not in content and 'compileOptions' in content:
+                  content = content.replace(
+                      'targetCompatibility = JavaVersion.VERSION_17\n            }',
+                      'targetCompatibility = JavaVersion.VERSION_17\n        }\n\n        kotlinOptions {\n            jvmTarget = "17"\n        }'
+                  )
+
+              with open(gradle_file, 'w') as f:
+                  f.write(content)
+
+              print(f"--- PATCHED {gradle_file} ---")
+              print(content)
+              print(f"--- END PATCHED ---")
+
+              # Verify critical patches
+              assert 'compileSdk = 36' in content or 'compileSdk 36' in content, "compileSdk 36 not found!"
+              assert 'desugar_jdk_libs' in content, "desugar_jdk_libs dependency not found!"
+              assert 'google-services' in content, "google-services plugin not found!"
+              print("VERIFICATION: All critical patches confirmed!")
+
+          # === 2. Patch settings.gradle.kts for google-services plugin (modern Gradle approach) ===
+          # In Kotlin DSL, classpath() is NOT available outside buildscript {} block.
+          # The modern approach is to declare the plugin in settings.gradle.kts plugins block
+          # with 'apply false', then apply it in app-level build.gradle.kts with just id().
+          for settings_file in glob.glob("android/settings.gradle*"):
+              kts = is_kts(settings_file)
+              with open(settings_file, 'r') as f:
+                  content = f.read()
+
+              if 'com.google.gms' not in content:
+                  if kts:
+                      # Kotlin DSL - add to plugins block with apply false
+                      if 'plugins {' in content:
+                          content = re.sub(
+                              r'(plugins\s*\{)',
+                              r'\1\n    id("com.google.gms.google-services") version "4.4.2" apply false',
+                              content
+                          )
+                      else:
+                          content = content.rstrip() + '\n\nplugins {\n    id("com.google.gms.google-services") version "4.4.2" apply false\n}\n'
+                  else:
+                      # Groovy DSL - add to plugins block with apply false
+                      if 'plugins {' in content:
+                          content = re.sub(
+                              r'(plugins\s*\{)',
+                              r'\1\n    id "com.google.gms.google-services" version "4.4.2" apply false',
+                              content
+                          )
+                      else:
+                          content = content.rstrip() + '\n\nplugins {\n    id "com.google.gms.google-services" version "4.4.2" apply false\n}\n'
+                  print(f"Added google-services plugin to {settings_file}")
+
+              with open(settings_file, 'w') as f:
+                  f.write(content)
+
+          # Also ensure google-services plugin is resolvable by adding google() repo to pluginManagement
+          # if it's not already there (needed for the plugins {} block to resolve the artifact)
+          for settings_file in glob.glob("android/settings.gradle*"):
+              with open(settings_file, 'r') as f:
+                  content = f.read()
+              # Make sure pluginManagement has google() repository
+              if 'pluginManagement' in content and 'repositories {' in content:
+                  # Check if google() is inside pluginManagement
+                  pm_match = re.search(r'pluginManagement\s*\{([^}]*)\}', content, re.DOTALL)
+                  if pm_match and 'google()' not in pm_match.group(1):
+                      # Add google() to the first repositories block inside pluginManagement
+                      content = content.replace(
+                          'pluginManagement {',
+                          'pluginManagement {\n    repositories {\n        google()\n        mavenCentral()\n        gradlePluginPortal()\n    }'
+                      )
+                      # Remove duplicate repositories block if it existed
+                      content = re.sub(r'(pluginManagement\s*\{[^}]*repositories\s*\{[^}]*\}\s*)repositories\s*\{[^}]*\}', r'\1', content)
+                      print(f"Added google() to pluginManagement in {settings_file}")
+              with open(settings_file, 'w') as f:
+                  f.write(content)
+
+          # === 3. Patch ALL cached plugin build.gradle files ===
+          pub_cache = os.path.expanduser("~/.pub-cache")
+          patched_count = 0
+          for root, dirs, files in os.walk(pub_cache):
+              for fname in files:
+                  if fname == "build.gradle":
+                      fpath = os.path.join(root, fname)
+                      try:
+                          with open(fpath, 'r') as f:
+                              plugin_content = f.read()
+
+                          changed = False
+
+                          # Upgrade compileSdk
+                          new_content = re.sub(r'compileSdk\s+\d+', 'compileSdk 36', plugin_content)
+                          if new_content != plugin_content:
+                              plugin_content = new_content
+                              changed = True
+
+                          new_content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 36', plugin_content)
+                          if new_content != plugin_content:
+                              plugin_content = new_content
+                              changed = True
+
+                          # Add namespace if missing
+                          if 'namespace' not in plugin_content:
+                              manifest_dir = os.path.join(os.path.dirname(fpath), 'src', 'main')
+                              manifest_path = os.path.join(manifest_dir, 'AndroidManifest.xml')
+                              if not os.path.exists(manifest_path):
+                                  for search_root, _, search_files in os.walk(os.path.dirname(fpath)):
+                                      if 'AndroidManifest.xml' in search_files:
+                                          manifest_path = os.path.join(search_root, 'AndroidManifest.xml')
+                                          break
+
+                              if os.path.exists(manifest_path):
+                                  with open(manifest_path, 'r') as mf:
+                                      manifest_content = mf.read()
+                                  pkg_match = re.search(r'package="([^"]+)"', manifest_content)
+                                  if pkg_match:
+                                      package_name = pkg_match.group(1)
+                                      plugin_content = plugin_content.replace(
+                                          'android {',
+                                          f"android {{\n    namespace '{package_name}'"
+                                      )
+                                      changed = True
+                                      print(f"Added namespace '{package_name}' to {fpath}")
+
+                          if changed:
+                              with open(fpath, 'w') as f:
+                                  f.write(plugin_content)
+                              patched_count += 1
+                              print(f"Patched {fpath}")
+                      except Exception as e:
+                          print(f"Error patching {fpath}: {e}")
+
+          print(f"Patched {patched_count} plugin build files")
+          print("=== All patches complete ===")
+          PYEOF
+
+      - name: Fix missing namespaces in cached plugins (shell fallback)
+        script: |
+          echo "Fixing missing namespaces in cached plugins..."
+          for BUILD_FILE in $(find ~/.pub-cache -name "build.gradle" -path "*/android/build.gradle"); do
+            if ! grep -q "namespace" "$BUILD_FILE"; then
+              MANIFEST=$(find "$(dirname "$BUILD_FILE")" -name "AndroidManifest.xml" | head -1)
+              if [ -f "$MANIFEST" ]; then
+                PACKAGE=$(grep -o 'package="[^"]*"' "$MANIFEST" | head -1 | sed 's/package="//;s/"//')
+                if [ -n "$PACKAGE" ]; then
+                  echo "Adding namespace '$PACKAGE' to $BUILD_FILE"
+                  sed -i '' "s/^android {/android {\n    namespace '$PACKAGE'/" "$BUILD_FILE"
+                fi
+              fi
+            fi
+          done
+          echo "=== Namespace fix complete ==="
+
+      - name: Fix all Dart code issues and update firebase_options
+        script: |
+          echo "Fixing Dart code issues..."
+
+          # ============================================================
+          # Update firebase_options.dart with real values from env vars
+          # If not set, the placeholder values remain (build will still
+          # work but Firebase features won't function until configured)
+          # ============================================================
+          FIREBASE_OPTS="lib/firebase_options.dart"
+          if [ -f "$FIREBASE_OPTS" ]; then
+            if [ -n "$FIREBASE_ANDROID_API_KEY" ]; then
+              sed -i '' "s/YOUR_ANDROID_API_KEY/$FIREBASE_ANDROID_API_KEY/" "$FIREBASE_OPTS"
+              sed -i '' "s/YOUR_ANDROID_APP_ID/$FIREBASE_ANDROID_APP_ID/" "$FIREBASE_OPTS"
+              sed -i '' "s/YOUR_SENDER_ID/$FIREBASE_MESSAGING_SENDER_ID/" "$FIREBASE_OPTS"
+              sed -i '' "s/YOUR_PROJECT_ID/$FIREBASE_PROJECT_ID/" "$FIREBASE_OPTS"
+              sed -i '' "s/YOUR_PROJECT_ID.appspot.com/$FIREBASE_STORAGE_BUCKET/" "$FIREBASE_OPTS"
+              echo "Firebase options updated from environment variables"
+            else
+              echo "WARNING: Firebase env vars not set. Using placeholder values."
+              echo "Set these in Codemagic: FIREBASE_ANDROID_API_KEY, FIREBASE_ANDROID_APP_ID, etc."
+            fi
+          fi
+
+          # Fix CardTheme → CardThemeData in main.dart
+          MAIN_FILE="lib/main.dart"
+          if [ -f "$MAIN_FILE" ]; then
+            sed -i '' 's/CardTheme(/CardThemeData(/' "$MAIN_FILE"
+            echo "Fixed main.dart"
+          fi
+
+          # Fix push_notification_service.dart
+          PUSH_FILE="lib/services/push_notification_service.dart"
+          if [ -f "$PUSH_FILE" ]; then
+            sed -i '' 's/const AndroidNotificationDetails androidDetails/AndroidNotificationDetails androidDetails/' "$PUSH_FILE"
+            sed -i '' 's/const NotificationDetails details/NotificationDetails details/' "$PUSH_FILE"
+            echo "Fixed push_notification_service.dart"
+          fi
+
+          # Fix api_service.dart
+          API_FILE="lib/services/api_service.dart"
+          if [ -f "$API_FILE" ]; then
+            sed -i '' 's/StorageService()/StorageService.instance/' "$API_FILE"
+            echo "Fixed api_service.dart"
+          fi
+
+          # Fix api_config.dart
+          API_CFG="lib/config/api_config.dart"
+          if [ -f "$API_CFG" ]; then
+            sed -i '' 's/static const double GPS_DISTANCE_FILTER_METERS = 5.0;/static const int GPS_DISTANCE_FILTER_METERS = 5;/' "$API_CFG"
+            echo "Fixed api_config.dart"
+          fi
+
+          # Fix location_service.dart
+          LOC_FILE="lib/services/location_service.dart"
+          if [ -f "$LOC_FILE" ]; then
+            sed -i '' 's/ApiConfig.GPS_DISTANCE_FILTER_METERS.toInt()/ApiConfig.GPS_DISTANCE_FILTER_METERS/g' "$LOC_FILE"
+            sed -i '' 's/locationSettings: const LocationSettings(/desiredAccuracy: LocationAccuracy.high,/' "$LOC_FILE"
+            sed -i '' '/accuracy: LocationAccuracy.high,$/d' "$LOC_FILE"
+            sed -i '' '/timeLimit: Duration(seconds: 10),$/s//timeLimit: Duration(seconds: 10),/' "$LOC_FILE"
+            sed -i '' 's/        ),$/      );/' "$LOC_FILE"
+            echo "Fixed location_service.dart"
+          fi
+
+          echo "=== All Dart fixes complete ==="
+
+      - name: Re-get packages after pubspec fix
+        script: flutter pub get
+
+      - name: Create demo_mode.dart for Rider App
+        script: |
+          mkdir -p lib/utils
+          cat > lib/utils/demo_mode.dart << 'DARTEOF'
+          import 'dart:io';
+          import 'package:shared_preferences/shared_preferences.dart';
+
+          class DemoMode {
+            static const String _keyIsGuest = 'rider_is_guest_mode';
+            static const String _keyUserToken = 'auth_token';
+            static const String _keyUserId = 'rider_id';
+            static const String _keyUserName = 'rider_name';
+            static const String _keyUserPhone = 'rider_phone';
+
+            static bool _isGuest = false;
+            static bool get isGuest => _isGuest;
+
+            static Future<void> enableGuestMode() async {
+              _isGuest = true;
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool(_keyIsGuest, true);
+              await prefs.setString(_keyUserToken, 'demo_rider_token_99999');
+              await prefs.setInt(_keyUserId, 99);
+              await prefs.setString(_keyUserName, 'Demo Rider');
+              await prefs.setString(_keyUserPhone, '0712345678');
+            }
+
+            static Future<void> disableGuestMode() async {
+              _isGuest = false;
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove(_keyIsGuest);
+              await prefs.remove(_keyUserToken);
+              await prefs.remove(_keyUserId);
+              await prefs.remove(_keyUserName);
+              await prefs.remove(_keyUserPhone);
+            }
+
+            static Future<bool> checkGuestMode() async {
+              try {
+                final prefs = await SharedPreferences.getInstance();
+                _isGuest = prefs.getBool(_keyIsGuest) ?? false;
+              } catch (e) {
+                _isGuest = false;
+              }
+              return _isGuest;
+            }
+
+            static Future<bool> isServerReachable() async {
+              try {
+                final socket = await Socket.connect('ats.unaux.com', 443, timeout: Duration(seconds: 3));
+                socket.destroy();
+                return true;
+              } catch (e) {
+                try {
+                  final socket = await Socket.connect('ats.unaux.com', 80, timeout: Duration(seconds: 3));
+                  socket.destroy();
+                  return true;
+                } catch (e2) {
+                  return false;
+                }
+              }
+            }
+
+            static Future<String?> getToken() async {
+              try {
+                final prefs = await SharedPreferences.getInstance();
+                return prefs.getString(_keyUserToken);
+              } catch (e) { return null; }
+            }
+
+            static Future<int?> getUserId() async {
+              try {
+                final prefs = await SharedPreferences.getInstance();
+                return prefs.getInt(_keyUserId);
+              } catch (e) { return null; }
+            }
+
+            static Map<String, dynamic> getDemoRiderProfile() => {
+              'id': 99,
+              'name': 'Demo Rider',
+              'phone': '0712345678',
+              'email': 'demo.rider@kilifihub.co.ke',
+              'avatar_url': '',
+              'is_online': false,
+              'vehicle_type': 'Motorcycle',
+              'vehicle_plate': 'KBA 123J',
+              'rating': 4.7,
+              'total_deliveries': 156,
+              'registration_status': 'approved',
+              'device_token': '',
+            };
+
+            static List<Map<String, dynamic>> getDemoActiveOrders() => [
+              {
+                'id': 5001,
+                'order_number': 'KH-5001',
+                'status': 'rider-accepted',
+                'date_created': '2025-06-01T10:30:00',
+                'total': '850.00',
+                'currency': 'KES',
+                'payment_method_title': 'M-Pesa',
+                'vendor': {
+                  'id': 1,
+                  'name': 'Kilifi Fresh Kitchen',
+                  'address': 'Kilifi Town Center, Mombasa Road',
+                  'latitude': '-3.6330',
+                  'longitude': '39.8490',
+                  'phone': '+254700000001',
+                },
+                'customer': {
+                  'name': 'Alice Mwangi',
+                  'phone': '0722123456',
+                  'address': 'Mnarani Estate, House No. 4',
+                  'latitude': '-3.6280',
+                  'longitude': '39.8520',
+                  'notes': 'Call when at the gate',
+                },
+                'delivery': {
+                  'delivery_fee': '120.00',
+                  'distance': '3.5',
+                  'estimated_time': '15 min',
+                },
+                'items': [
+                  {'name': 'Chicken Biryani', 'quantity': 2, 'price': '350.00'},
+                  {'name': 'Soda 500ml', 'quantity': 2, 'price': '50.00'},
+                ],
+              },
+              {
+                'id': 5002,
+                'order_number': 'KH-5002',
+                'status': 'rider-picked-up',
+                'date_created': '2025-06-01T09:45:00',
+                'total': '430.00',
+                'currency': 'KES',
+                'payment_method_title': 'Cash on Delivery',
+                'vendor': {
+                  'id': 2,
+                  'name': 'Coastal Goods Store',
+                  'address': 'Mombasa Road, Kilifi',
+                  'latitude': '-3.6350',
+                  'longitude': '39.8470',
+                  'phone': '+254700000002',
+                },
+                'customer': {
+                  'name': 'John Karisa',
+                  'phone': '0733456789',
+                  'address': 'Bofa Road, Near Beach',
+                  'latitude': '-3.6400',
+                  'longitude': '39.8550',
+                  'notes': '',
+                },
+                'delivery': {
+                  'delivery_fee': '100.00',
+                  'distance': '4.2',
+                  'estimated_time': '20 min',
+                },
+                'items': [
+                  {'name': 'Maize Flour 2kg', 'quantity': 1, 'price': '180.00'},
+                  {'name': 'Cooking Oil 1L', 'quantity': 1, 'price': '250.00'},
+                ],
+              },
+              {
+                'id': 5003,
+                'order_number': 'KH-5003',
+                'status': 'courier-assignment',
+                'date_created': '2025-06-01T11:58:00',
+                'total': '1200.00',
+                'currency': 'KES',
+                'payment_method_title': 'M-Pesa',
+                'vendor': {
+                  'id': 3,
+                  'name': 'Mnarani Supplies',
+                  'address': 'Mnarani, Kilifi',
+                  'latitude': '-3.6290',
+                  'longitude': '39.8510',
+                  'phone': '+254700000003',
+                },
+                'customer': {
+                  'name': 'Fatima Hamisi',
+                  'phone': '0744567890',
+                  'address': 'Kilifi Creek Road, Villa 12',
+                  'latitude': '-3.6310',
+                  'longitude': '39.8480',
+                  'notes': 'Ring doorbell twice',
+                },
+                'delivery': {
+                  'delivery_fee': '150.00',
+                  'distance': '5.0',
+                  'estimated_time': '25 min',
+                },
+                'items': [
+                  {'name': 'Rice 5kg', 'quantity': 1, 'price': '650.00'},
+                  {'name': 'Sugar 2kg', 'quantity': 1, 'price': '340.00'},
+                  {'name': 'Tea Leaves', 'quantity': 1, 'price': '60.00'},
+                ],
+              },
+            ];
+
+            static Map<String, dynamic> getDemoEarnings() => {
+              'today_earnings': '680.00',
+              'week_earnings': '4200.00',
+              'month_earnings': '18500.00',
+              'today_deliveries': 5,
+              'week_deliveries': 32,
+              'month_deliveries': 148,
+              'daily_breakdown': [
+                {'date': '2025-06-01', 'earnings': '680.00', 'deliveries': 5},
+                {'date': '2025-05-31', 'earnings': '920.00', 'deliveries': 7},
+                {'date': '2025-05-30', 'earnings': '540.00', 'deliveries': 4},
+                {'date': '2025-05-29', 'earnings': '780.00', 'deliveries': 6},
+                {'date': '2025-05-28', 'earnings': '640.00', 'deliveries': 5},
+                {'date': '2025-05-27', 'earnings': '460.00', 'deliveries': 3},
+                {'date': '2025-05-26', 'earnings': '180.00', 'deliveries': 2},
+              ],
+              'recent_payments': [
+                {'order_id': 5003, 'amount': '150.00', 'date': '2025-06-01T11:55:00', 'type': 'delivery_fee', 'vendor_name': 'Mnarani Supplies'},
+                {'order_id': 5002, 'amount': '100.00', 'date': '2025-06-01T09:40:00', 'type': 'delivery_fee', 'vendor_name': 'Coastal Goods Store'},
+                {'order_id': 5001, 'amount': '120.00', 'date': '2025-06-01T08:30:00', 'type': 'delivery_fee', 'vendor_name': 'Kilifi Fresh Kitchen'},
+                {'order_id': 4998, 'amount': '90.00', 'date': '2025-06-01T06:00:00', 'type': 'delivery_fee', 'vendor_name': 'Kilifi Fresh Market'},
+                {'order_id': 4996, 'amount': '110.00', 'date': '2025-06-01T04:00:00', 'type': 'delivery_fee', 'vendor_name': 'Coastal Goods Store'},
+                {'order_id': 4995, 'amount': '50.00', 'date': '2025-06-01T03:00:00', 'type': 'tip', 'vendor_name': 'Happy Customer'},
+                {'order_id': 4993, 'amount': '60.00', 'date': '2025-05-31T14:00:00', 'type': 'delivery_fee', 'vendor_name': 'Mnarani Supplies'},
+              ],
+            };
+
+            static Map<String, dynamic> getDemoResponse(String endpoint) {
+              if (endpoint.contains('earning')) return getDemoEarnings();
+              if (endpoint.contains('order')) return {'data': getDemoActiveOrders()};
+              if (endpoint.contains('profile') || endpoint.contains('rider')) return getDemoRiderProfile();
+              if (endpoint.contains('vendor') || endpoint.contains('store')) return {'data': []};
+              return {'data': []};
+            }
+          }
+          DARTEOF
+          echo "Created demo_mode.dart"
+
+      - name: Create guest_home_screen.dart for Rider App
+        script: |
+          cat > lib/screens/guest_home_screen.dart << 'DARTEOF'
+          import 'package:flutter/material.dart';
+          import '../utils/demo_mode.dart';
+          import '../config/app_config.dart';
+
+          class GuestHomeScreen extends StatefulWidget {
+            const GuestHomeScreen({Key? key}) : super(key: key);
+            @override
+            State<GuestHomeScreen> createState() => _GuestHomeScreenState();
+          }
+
+          class _GuestHomeScreenState extends State<GuestHomeScreen> with SingleTickerProviderStateMixin {
+            int _currentIndex = 0;
+            bool _isOnline = false;
+            late TabController _earningsTabController;
+
+            @override
+            void initState() {
+              super.initState();
+              _earningsTabController = TabController(length: 3, vsync: this);
+            }
+
+            @override
+            void dispose() {
+              _earningsTabController.dispose();
+              super.dispose();
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(
+                body: IndexedStack(
+                  index: _currentIndex,
+                  children: [
+                    _buildHomeTab(),
+                    _buildEarningsTab(),
+                    _buildProfileTab(),
+                  ],
+                ),
+                bottomNavigationBar: _buildBottomNav(),
+              );
+            }
+
+            // ======== DEMO BANNER ========
+            Widget _buildDemoBanner() {
+              return Container(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade700,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.wifi_off, color: Colors.white, size: 16),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text('Demo Mode - Server Unavailable',
+                        style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            // ======== HOME TAB ========
+            Widget _buildHomeTab() {
+              final orders = DemoMode.getDemoActiveOrders();
+              return SafeArea(
+                child: Column(
+                  children: [
+                    _buildHeader(),
+                    Expanded(
+                      child: RefreshIndicator(
+                        onRefresh: () async => setState(() {}),
+                        color: Color(AppConfig.PRIMARY_COLOR),
+                        child: CustomScrollView(
+                          slivers: [
+                            SliverToBoxAdapter(
+                              child: Padding(
+                                padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
+                                child: Row(
+                                  children: [
+                                    Text('Active Orders',
+                                      style: TextStyle(
+                                        fontSize: AppConfig.FONT_SIZE_LARGE,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(AppConfig.TEXT_PRIMARY),
+                                      ),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Container(
+                                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Color(AppConfig.PRIMARY_COLOR),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text('${orders.length}',
+                                        style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            SliverPadding(
+                              padding: EdgeInsets.all(20),
+                              sliver: SliverList(
+                                delegate: SliverChildBuilderDelegate(
+                                  (context, index) {
+                                    final order = orders[index];
+                                    return Padding(
+                                      padding: EdgeInsets.only(bottom: 12),
+                                      child: _buildDemoOrderCard(order),
+                                    );
+                                  },
+                                  childCount: orders.length,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            Widget _buildHeader() {
+              return Container(
+                padding: EdgeInsets.fromLTRB(20, 16, 20, 20),
+                decoration: BoxDecoration(
+                  color: _isOnline
+                      ? Color(AppConfig.SUCCESS_COLOR).withOpacity(0.08)
+                      : Color(AppConfig.BACKGROUND_COLOR),
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(24),
+                    bottomRight: Radius.circular(24),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _isOnline ? "You're Online" : "You're Offline",
+                                style: TextStyle(
+                                  fontSize: AppConfig.FONT_SIZE_SMALL,
+                                  color: _isOnline ? Color(AppConfig.SUCCESS_COLOR) : Color(AppConfig.TEXT_SECONDARY),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              SizedBox(height: 2),
+                              Text('Hi, Demo Rider!',
+                                style: TextStyle(
+                                  fontSize: AppConfig.FONT_SIZE_XLARGE,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(AppConfig.TEXT_PRIMARY),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        CircleAvatar(
+                          radius: 24,
+                          backgroundColor: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.15),
+                          child: Icon(Icons.person, color: Color(AppConfig.PRIMARY_COLOR), size: 28),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 20),
+                    _buildDemoBanner(),
+                    SizedBox(height: 12),
+                    GestureDetector(
+                      onTap: () => setState(() => _isOnline = !_isOnline),
+                      child: Container(
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: _isOnline ? Color(AppConfig.SUCCESS_COLOR) : Color(AppConfig.PRIMARY_COLOR),
+                          borderRadius: BorderRadius.circular(28),
+                          boxShadow: [
+                            BoxShadow(
+                              color: (_isOnline ? Color(AppConfig.SUCCESS_COLOR) : Color(AppConfig.PRIMARY_COLOR)).withOpacity(0.3),
+                              blurRadius: 12,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(_isOnline ? Icons.power_settings_new : Icons.play_arrow, color: Colors.white, size: 24),
+                              SizedBox(width: 8),
+                              Text(
+                                _isOnline ? 'Go Offline' : 'Go Live',
+                                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            Widget _buildDemoOrderCard(Map<String, dynamic> order) {
+              final status = order['status'] as String? ?? '';
+              final vendor = order['vendor'] as Map<String, dynamic>? ?? {};
+              final customer = order['customer'] as Map<String, dynamic>? ?? {};
+              final items = order['items'] as List<dynamic>? ?? [];
+              final delivery = order['delivery'] as Map<String, dynamic>? ?? {};
+
+              Color statusColor;
+              String statusLabel;
+              switch (status) {
+                case 'courier-assignment':
+                  statusColor = Color(AppConfig.ACCENT_COLOR);
+                  statusLabel = 'New Order';
+                  break;
+                case 'rider-accepted':
+                  statusColor = Color(0xFF2196F3);
+                  statusLabel = 'Accepted';
+                  break;
+                case 'rider-picked-up':
+                  statusColor = Color(AppConfig.PRIMARY_COLOR);
+                  statusLabel = 'Picked Up';
+                  break;
+                default:
+                  statusColor = Color(AppConfig.TEXT_SECONDARY);
+                  statusLabel = status;
+              }
+
+              return Container(
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10, offset: Offset(0, 3)),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('#${order['order_number']}',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(AppConfig.TEXT_PRIMARY))),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(color: statusColor.withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
+                          child: Text(statusLabel, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Icon(Icons.store_outlined, size: 16, color: Color(AppConfig.ACCENT_COLOR)),
+                        SizedBox(width: 6),
+                        Expanded(child: Text(vendor['name'] ?? '', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(AppConfig.TEXT_PRIMARY)), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                      ],
+                    ),
+                    SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(Icons.location_on_outlined, size: 16, color: Color(AppConfig.PRIMARY_COLOR)),
+                        SizedBox(width: 6),
+                        Expanded(child: Text(customer['address'] ?? customer['name'] ?? '', style: TextStyle(fontSize: 13, color: Color(AppConfig.TEXT_SECONDARY)), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                      ],
+                    ),
+                    SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Text('${items.length} item${items.length != 1 ? 's' : ''}', style: TextStyle(fontSize: 12, color: Color(AppConfig.TEXT_HINT))),
+                        Spacer(),
+                        Text('KSh ${delivery['delivery_fee'] ?? '0'} fee', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(AppConfig.SUCCESS_COLOR))),
+                        SizedBox(width: 8),
+                        Text('KSh ${order['total'] ?? '0'}', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            // ======== EARNINGS TAB ========
+            Widget _buildEarningsTab() {
+              final earnings = DemoMode.getDemoEarnings();
+              final todayEarnings = double.tryParse(earnings['today_earnings']?.toString() ?? '0') ?? 0;
+              final weekEarnings = double.tryParse(earnings['week_earnings']?.toString() ?? '0') ?? 0;
+              final monthEarnings = double.tryParse(earnings['month_earnings']?.toString() ?? '0') ?? 0;
+              final todayDeliveries = earnings['today_deliveries'] as int? ?? 0;
+              final weekDeliveries = earnings['week_deliveries'] as int? ?? 0;
+              final monthDeliveries = earnings['month_deliveries'] as int? ?? 0;
+              final payments = earnings['recent_payments'] as List<dynamic>? ?? [];
+
+              return Scaffold(
+                backgroundColor: Color(AppConfig.BACKGROUND_COLOR),
+                appBar: AppBar(
+                  title: Text('Earnings'),
+                  backgroundColor: Colors.white,
+                  foregroundColor: Color(AppConfig.TEXT_PRIMARY),
+                  elevation: 0.5,
+                ),
+                body: SingleChildScrollView(
+                  physics: AlwaysScrollableScrollPhysics(),
+                  padding: EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildDemoBanner(),
+                      SizedBox(height: 16),
+                      Container(
+                        padding: EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Color(AppConfig.PRIMARY_COLOR), Color(0xFFFF6B6B)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.3), blurRadius: 16, offset: Offset(0, 6)),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text("Today's Earnings", style: TextStyle(color: Colors.white70, fontSize: 14)),
+                            SizedBox(height: 4),
+                            Text('KSh ${todayEarnings.toStringAsFixed(0)}',
+                              style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
+                            SizedBox(height: 16),
+                            Row(
+                              children: [
+                                _buildEarningChip(Icons.delivery_dining, '$todayDeliveries deliveries'),
+                                SizedBox(width: 12),
+                                _buildEarningChip(Icons.trending_up,
+                                  todayEarnings > 0 ? 'KSh ${(todayEarnings / (todayDeliveries > 0 ? todayDeliveries : 1)).toStringAsFixed(0)}/delivery' : 'No deliveries yet'),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: 20),
+                      Container(
+                        height: 44,
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                        child: TabBar(
+                          controller: _earningsTabController,
+                          labelColor: Colors.white,
+                          unselectedLabelColor: Color(AppConfig.TEXT_SECONDARY),
+                          indicatorSize: TabBarIndicatorSize.tab,
+                          indicator: BoxDecoration(color: Color(AppConfig.PRIMARY_COLOR), borderRadius: BorderRadius.circular(10)),
+                          dividerColor: Colors.transparent,
+                          tabs: [Tab(text: 'Today'), Tab(text: 'This Week'), Tab(text: 'This Month')],
+                        ),
+                      ),
+                      SizedBox(height: 20),
+                      SizedBox(
+                        height: 180,
+                        child: TabBarView(
+                          controller: _earningsTabController,
+                          children: [
+                            _buildPeriodCard(todayEarnings, todayDeliveries, 'today'),
+                            _buildPeriodCard(weekEarnings, weekDeliveries, 'this week'),
+                            _buildPeriodCard(monthEarnings, monthDeliveries, 'this month'),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: 20),
+                      Text('Recent Payments', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
+                      SizedBox(height: 12),
+                      ...payments.take(7).map((p) {
+                        final payment = p as Map<String, dynamic>;
+                        final amount = double.tryParse(payment['amount']?.toString() ?? '0') ?? 0;
+                        final isTip = payment['type'] == 'tip';
+                        return Container(
+                          margin: EdgeInsets.only(bottom: 8),
+                          padding: EdgeInsets.all(14),
+                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 40, height: 40,
+                                decoration: BoxDecoration(
+                                  color: (isTip ? Color(AppConfig.ACCENT_COLOR) : Color(AppConfig.SUCCESS_COLOR)).withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(10)),
+                                child: Icon(isTip ? Icons.card_giftcard : Icons.add_circle_outline,
+                                  color: isTip ? Color(AppConfig.ACCENT_COLOR) : Color(AppConfig.SUCCESS_COLOR), size: 20),
+                              ),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(payment['vendor_name'] ?? 'Order', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(AppConfig.TEXT_PRIMARY))),
+                                    Text(isTip ? 'Tip' : 'Delivery Fee', style: TextStyle(fontSize: 12, color: Color(AppConfig.TEXT_HINT))),
+                                  ],
+                                ),
+                              ),
+                              Text('+KSh ${amount.toStringAsFixed(0)}',
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(AppConfig.SUCCESS_COLOR))),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            Widget _buildEarningChip(IconData icon, String label) {
+              return Container(
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(8)),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, color: Colors.white, size: 16),
+                    SizedBox(width: 4),
+                    Text(label, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+                  ],
+                ),
+              );
+            }
+
+            Widget _buildPeriodCard(double earnings, int deliveries, String period) {
+              return Container(
+                padding: EdgeInsets.all(20),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: Offset(0, 2))]),
+                child: Column(
+                  children: [
+                    Text('KSh ${earnings.toStringAsFixed(0)}',
+                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
+                    SizedBox(height: 4),
+                    Text('earned $period', style: TextStyle(fontSize: 14, color: Color(AppConfig.TEXT_SECONDARY))),
+                    SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: EdgeInsets.all(12),
+                            decoration: BoxDecoration(color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.08), borderRadius: BorderRadius.circular(12)),
+                            child: Column(
+                              children: [
+                                Icon(Icons.motorcycle, color: Color(AppConfig.PRIMARY_COLOR), size: 24),
+                                SizedBox(height: 6),
+                                Text('$deliveries', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(AppConfig.PRIMARY_COLOR))),
+                                SizedBox(height: 2),
+                                Text('Deliveries', style: TextStyle(fontSize: 11, color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.7))),
+                              ],
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Container(
+                            padding: EdgeInsets.all(12),
+                            decoration: BoxDecoration(color: Color(AppConfig.ACCENT_COLOR).withOpacity(0.08), borderRadius: BorderRadius.circular(12)),
+                            child: Column(
+                              children: [
+                                Icon(Icons.analytics_outlined, color: Color(AppConfig.ACCENT_COLOR), size: 24),
+                                SizedBox(height: 6),
+                                Text(deliveries > 0 ? 'KSh ${(earnings / deliveries).toStringAsFixed(0)}' : 'KSh 0',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(AppConfig.ACCENT_COLOR))),
+                                SizedBox(height: 2),
+                                Text('Avg/Delivery', style: TextStyle(fontSize: 11, color: Color(AppConfig.ACCENT_COLOR).withOpacity(0.7))),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            // ======== PROFILE TAB ========
+            Widget _buildProfileTab() {
+              final profile = DemoMode.getDemoRiderProfile();
+              return Scaffold(
+                backgroundColor: Color(AppConfig.BACKGROUND_COLOR),
+                appBar: AppBar(
+                  title: Text('Profile'),
+                  backgroundColor: Colors.white,
+                  foregroundColor: Color(AppConfig.TEXT_PRIMARY),
+                  elevation: 0.5,
+                ),
+                body: SingleChildScrollView(
+                  padding: EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      _buildDemoBanner(),
+                      SizedBox(height: 16),
+                      Container(
+                        padding: EdgeInsets.all(20),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: Offset(0, 2))]),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 64, height: 64,
+                              decoration: BoxDecoration(color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+                              child: Icon(Icons.person, size: 32, color: Color(AppConfig.PRIMARY_COLOR)),
+                            ),
+                            SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(profile['name'] ?? 'Demo Rider',
+                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
+                                  SizedBox(height: 2),
+                                  Text('+254 ${profile['phone'] ?? ''}',
+                                    style: TextStyle(fontSize: 14, color: Color(AppConfig.TEXT_SECONDARY))),
+                                  SizedBox(height: 6),
+                                  Container(
+                                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(color: Color(AppConfig.SUCCESS_COLOR).withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                                    child: Text('Verified Rider',
+                                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(AppConfig.SUCCESS_COLOR))),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: 20),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              padding: EdgeInsets.all(16),
+                              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                              child: Column(
+                                children: [
+                                  Icon(Icons.delivery_dining, color: Color(AppConfig.PRIMARY_COLOR), size: 28),
+                                  SizedBox(height: 8),
+                                  Text('${profile['total_deliveries'] ?? 0}',
+                                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(AppConfig.PRIMARY_COLOR))),
+                                  SizedBox(height: 2),
+                                  Text('Deliveries', style: TextStyle(fontSize: 12, color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.7))),
+                                ],
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Container(
+                              padding: EdgeInsets.all(16),
+                              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                              child: Column(
+                                children: [
+                                  Icon(Icons.star, color: Color(AppConfig.ACCENT_COLOR), size: 28),
+                                  SizedBox(height: 8),
+                                  Text('${profile['rating'] ?? 0.0}',
+                                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(AppConfig.ACCENT_COLOR))),
+                                  SizedBox(height: 2),
+                                  Text('Rating', style: TextStyle(fontSize: 12, color: Color(AppConfig.ACCENT_COLOR).withOpacity(0.7))),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 20),
+                      Container(
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                        child: Column(
+                          children: [
+                            _buildMenuItem(Icons.person_outline, 'Personal Information', 'Name, phone, email'),
+                            Divider(height: 1, color: Color(AppConfig.DIVIDER_COLOR), indent: 56),
+                            _buildMenuItem(Icons.motorcycle_outlined, 'Vehicle Details', '${profile['vehicle_type']} - ${profile['vehicle_plate']}'),
+                            Divider(height: 1, color: Color(AppConfig.DIVIDER_COLOR), indent: 56),
+                            _buildMenuItem(Icons.star_outline, 'Ratings and Reviews', '${profile['rating']} average rating'),
+                            Divider(height: 1, color: Color(AppConfig.DIVIDER_COLOR), indent: 56),
+                            _buildMenuItem(Icons.notifications_outlined, 'Notification Settings', 'Manage alerts and sounds'),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: 12),
+                      Container(
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                        child: Column(
+                          children: [
+                            _buildMenuItem(Icons.help_outline, 'Help and Support', 'Contact support, FAQ'),
+                            Divider(height: 1, color: Color(AppConfig.DIVIDER_COLOR), indent: 56),
+                            _buildMenuItem(Icons.info_outline, 'About KilifiHub Rider', 'Version 1.0.0'),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            await DemoMode.disableGuestMode();
+                            try { Navigator.of(context).pushReplacementNamed('/'); } catch(e) { debugPrint('Nav error'); }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Color(AppConfig.ERROR_COLOR),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: Text('Exit Demo Mode', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                      SizedBox(height: 32),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            Widget _buildMenuItem(IconData icon, String title, String subtitle) {
+              return InkWell(
+                onTap: () {},
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: EdgeInsets.all(14),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 36, height: 36,
+                        decoration: BoxDecoration(color: Color(AppConfig.BACKGROUND_COLOR), borderRadius: BorderRadius.circular(10)),
+                        child: Icon(icon, size: 18, color: Color(AppConfig.TEXT_SECONDARY)),
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(AppConfig.TEXT_PRIMARY))),
+                            if (subtitle.isNotEmpty)
+                              Text(subtitle, style: TextStyle(fontSize: 12, color: Color(AppConfig.TEXT_HINT))),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.chevron_right, color: Color(AppConfig.TEXT_HINT), size: 20),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            // ======== BOTTOM NAVIGATION ========
+            Widget _buildBottomNav() {
+              return Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: Offset(0, -2)),
+                  ],
+                ),
+                child: NavigationBar(
+                  selectedIndex: _currentIndex,
+                  onDestinationSelected: (index) => setState(() => _currentIndex = index),
+                  backgroundColor: Colors.white,
+                  indicatorColor: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.1),
+                  height: 64,
+                  destinations: [
+                    NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
+                    NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), selectedIcon: Icon(Icons.account_balance_wallet), label: 'Earnings'),
+                    NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
+                  ],
+                ),
+              );
+            }
+          }
+          DARTEOF
+          echo "Created guest_home_screen.dart"
+
+
+      - name: Patch main.dart for demo mode
+        script: |
+          echo "=== Patching main.dart for demo mode ==="
+
+          python3 << 'PYEOF'
+          # === 3. Patch main.dart to integrate demo mode ===
+          main_path = "lib/main.dart"
+          with open(main_path, 'r') as f:
+              content = f.read()
+
+          # Add demo mode imports if not already present
+          if "demo_mode.dart" not in content:
+              content = "import 'utils/demo_mode.dart';\n" + content
+              print("Added demo_mode import to main.dart")
+          if "guest_home_screen.dart" not in content:
+              content = "import 'screens/guest_home_screen.dart';\n" + content
+              print("Added guest_home_screen import to main.dart")
+
+          # Patch main() function to check guest mode before Firebase init
+          if "await DemoMode.checkGuestMode()" not in content:
+              old_main = "void main() async {\n  WidgetsFlutterBinding.ensureInitialized();"
+              new_main = (
+                  "void main() async {\n"
+                  "  WidgetsFlutterBinding.ensureInitialized();\n\n"
+                  "  // Check if we were previously in guest/demo mode\n"
+                  "  await DemoMode.checkGuestMode();\n"
+                  "  if (!DemoMode.isGuest) {\n"
+                  "    // Try server reachability - if server is down, enable demo mode\n"
+                  "    final reachable = await DemoMode.isServerReachable();\n"
+                  "    if (!reachable) {\n"
+                  "      await DemoMode.enableGuestMode();\n"
+                  "    }\n"
+                  "  }"
+              )
+              content = content.replace(old_main, new_main)
+              print("Added DemoMode check to main()")
+
+          # Wrap Firebase init in a try-catch that falls back to demo mode
+          old_firebase = "  // Initialize Firebase\n  await Firebase.initializeApp(\n    options: DefaultFirebaseOptions.currentPlatform,\n  );"
+          new_firebase = (
+              "  // Initialize Firebase (skip in guest mode)\n"
+              "  if (!DemoMode.isGuest) {\n"
+              "    try {\n"
+              "      await Firebase.initializeApp(\n"
+              "        options: DefaultFirebaseOptions.currentPlatform,\n"
+              "      );\n"
+              "    } catch (e) {\n"
+              "      debugPrint('Firebase init failed, enabling demo mode: ' + e.toString());\n"
+              "      await DemoMode.enableGuestMode();\n"
+              "    }\n"
+              "  }"
+          )
+          if "DemoMode.isGuest) {" not in content and "Firebase.initializeApp" in content:
+              content = content.replace(old_firebase, new_firebase)
+              print("Wrapped Firebase init in demo mode check")
+
+          # Wrap other init calls in demo mode check
+          old_loc_init = "  // Initialize background location service\n  await LocationService.initializeBackgroundService();"
+          new_loc_init = "  // Initialize background location service (skip in guest mode)\n  if (!DemoMode.isGuest) {\n    await LocationService.initializeBackgroundService();\n  }"
+          if "DemoMode.isGuest" not in content.split("LocationService")[0] if "LocationService" in content else "":
+              content = content.replace(old_loc_init, new_loc_init)
+
+          old_push_init = "  // Initialize push notifications (FCM)\n  await PushNotificationService.instance.initialize();"
+          new_push_init = "  // Initialize push notifications (skip in guest mode)\n  if (!DemoMode.isGuest) {\n    await PushNotificationService.instance.initialize();\n  }"
+          if "DemoMode.isGuest" not in content.split("PushNotificationService")[0] if "PushNotificationService" in content else "":
+              content = content.replace(old_push_init, new_push_init)
+
+          # Patch _checkSession in AuthWrapper to handle demo mode
+          old_check = "  Future<void> _checkSession() async {\n    final auth = Provider.of<AuthService>(context, listen: false);\n    await auth.checkSession();\n    setState(() => _isChecking = false);\n  }"
+          new_check = (
+              "  Future<void> _checkSession() async {\n"
+              "    if (DemoMode.isGuest) {\n"
+              "      setState(() => _isChecking = false);\n"
+              "      return;\n"
+              "    }\n"
+              "    try {\n"
+              "      final auth = Provider.of<AuthService>(context, listen: false);\n"
+              "      await auth.checkSession();\n"
+              "    } catch (e) {\n"
+              "      debugPrint('Session check failed: ' + e.toString());\n"
+              "      await DemoMode.enableGuestMode();\n"
+              "    }\n"
+              "    setState(() => _isChecking = false);\n"
+              "  }"
+          )
+          if "await DemoMode.checkGuestMode()" in content and "DemoMode.isGuest) {" not in content.split("_checkSession")[1] if "_checkSession" in content else "":
+              content = content.replace(old_check, new_check)
+              print("Patched _checkSession for demo mode")
+
+          # Add GuestHomeScreen to AuthWrapper build
+          old_build = "    return Consumer<AuthService>(\n      builder: (context, auth, _) {\n        if (auth.isLoggedIn) {\n          return const HomeScreen();\n        }\n        return const LoginScreen();\n      },\n    );"
+          new_build = (
+              "    if (DemoMode.isGuest) {\n"
+              "      return const GuestHomeScreen();\n"
+              "    }\n\n"
+              "    return Consumer<AuthService>(\n"
+              "      builder: (context, auth, _) {\n"
+              "        if (auth.isLoggedIn) {\n"
+              "          return const HomeScreen();\n"
+              "        }\n"
+              "        return const LoginScreen();\n"
+              "      },\n"
+              "    );"
+          )
+          if "GuestHomeScreen" not in content:
+              content = content.replace(old_build, new_build)
+              print("Added GuestHomeScreen to AuthWrapper")
+
+          with open(main_path, 'w') as f:
+              f.write(content)
+          print("Patched main.dart for demo mode integration")
+          print("=== Demo mode setup complete ===")
+          PYEOF
+
+      - name: Build APK
+        script: flutter build apk --debug --android-skip-build-dependency-validation
+
+    artifacts:
+      - build/**/outputs/apk/**/*.apk
+
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com
+        notify:
+          success: true
+          failure: true
