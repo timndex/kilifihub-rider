@@ -69,7 +69,8 @@ workflows:
 
           # Write AndroidManifest.xml with our permissions
           cat > /tmp/fresh_project/android/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools">
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
               <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
               <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
@@ -117,11 +118,13 @@ workflows:
                       android:name="id.flutter.flutter_background_service.BackgroundService"
                       android:foregroundServiceType="location"
                       android:exported="false"
-                      android:stopWithTask="false" />
+                      android:stopWithTask="false"
+                      tools:replace="android:exported" />
                   <!-- Boot receiver -->
                   <receiver
                       android:name="id.flutter.flutter_background_service.BootReceiver"
-                      android:exported="false">
+                      android:exported="false"
+                      tools:replace="android:exported">
                       <intent-filter>
                           <action android:name="android.intent.action.BOOT_COMPLETED" />
                       </intent-filter>
@@ -159,7 +162,6 @@ workflows:
 
       - name: Get Flutter packages
         script: flutter pub get
-
 
       - name: Patch Gradle files and cached plugins for our requirements
         script: |
@@ -482,11 +484,17 @@ workflows:
       - name: Re-get packages after pubspec fix
         script: flutter pub get
 
-      - name: Create demo_mode.dart for Rider App
+      - name: Create demo mode files and patch main.dart for offline demo
         script: |
-          mkdir -p lib/utils
-          cat > lib/utils/demo_mode.dart << 'DARTEOF'
-          import 'dart:io';
+          echo "=== Creating demo mode files ==="
+
+          python3 << 'PYEOF'
+          import os
+
+          # === 1. Create lib/utils/demo_mode.dart ===
+          os.makedirs("lib/utils", exist_ok=True)
+
+          demo_mode_content = r"""import 'dart:io';
           import 'package:shared_preferences/shared_preferences.dart';
 
           class DemoMode {
@@ -715,13 +723,16 @@ workflows:
               return {'data': []};
             }
           }
-          DARTEOF
-          echo "Created demo_mode.dart"
+          """
 
-      - name: Create guest_home_screen.dart for Rider App
-        script: |
-          cat > lib/screens/guest_home_screen.dart << 'DARTEOF'
-          import 'package:flutter/material.dart';
+          with open("lib/utils/demo_mode.dart", "w") as f:
+              f.write(demo_mode_content)
+          print("Created lib/utils/demo_mode.dart")
+
+          # === 2. Create lib/screens/guest_home_screen.dart ===
+          os.makedirs("lib/screens", exist_ok=True)
+
+          guest_home_content = r"""import 'package:flutter/material.dart';
           import '../utils/demo_mode.dart';
           import '../config/app_config.dart';
 
@@ -763,7 +774,6 @@ workflows:
               );
             }
 
-            // ======== DEMO BANNER ========
             Widget _buildDemoBanner() {
               return Container(
                 padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -784,7 +794,6 @@ workflows:
               );
             }
 
-            // ======== HOME TAB ========
             Widget _buildHomeTab() {
               final orders = DemoMode.getDemoActiveOrders();
               return SafeArea(
@@ -1014,7 +1023,6 @@ workflows:
               );
             }
 
-            // ======== EARNINGS TAB ========
             Widget _buildEarningsTab() {
               final earnings = DemoMode.getDemoEarnings();
               final todayEarnings = double.tryParse(earnings['today_earnings']?.toString() ?? '0') ?? 0;
@@ -1023,7 +1031,6 @@ workflows:
               final todayDeliveries = earnings['today_deliveries'] as int? ?? 0;
               final weekDeliveries = earnings['week_deliveries'] as int? ?? 0;
               final monthDeliveries = earnings['month_deliveries'] as int? ?? 0;
-              final payments = earnings['recent_payments'] as List<dynamic>? ?? [];
 
               return Scaffold(
                 backgroundColor: Color(AppConfig.BACKGROUND_COLOR),
@@ -1057,160 +1064,79 @@ workflows:
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text("Today's Earnings", style: TextStyle(color: Colors.white70, fontSize: 14)),
+                            Text('Total Earnings', style: TextStyle(color: Colors.white70, fontSize: 14)),
                             SizedBox(height: 4),
-                            Text('KSh ${todayEarnings.toStringAsFixed(0)}',
-                              style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
+                            Text('KSh ${monthEarnings.toStringAsFixed(0)}',
+                              style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
                             SizedBox(height: 16),
                             Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
                               children: [
-                                _buildEarningChip(Icons.delivery_dining, '$todayDeliveries deliveries'),
-                                SizedBox(width: 12),
-                                _buildEarningChip(Icons.trending_up,
-                                  todayEarnings > 0 ? 'KSh ${(todayEarnings / (todayDeliveries > 0 ? todayDeliveries : 1)).toStringAsFixed(0)}/delivery' : 'No deliveries yet'),
+                                _buildEarningStat('Today', 'KSh ${todayEarnings.toStringAsFixed(0)}', todayDeliveries),
+                                _buildEarningStat('This Week', 'KSh ${weekEarnings.toStringAsFixed(0)}', weekDeliveries),
+                                _buildEarningStat('This Month', 'KSh ${monthEarnings.toStringAsFixed(0)}', monthDeliveries),
                               ],
                             ),
                           ],
                         ),
                       ),
                       SizedBox(height: 20),
-                      Container(
-                        height: 44,
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                        child: TabBar(
-                          controller: _earningsTabController,
-                          labelColor: Colors.white,
-                          unselectedLabelColor: Color(AppConfig.TEXT_SECONDARY),
-                          indicatorSize: TabBarIndicatorSize.tab,
-                          indicator: BoxDecoration(color: Color(AppConfig.PRIMARY_COLOR), borderRadius: BorderRadius.circular(10)),
-                          dividerColor: Colors.transparent,
-                          tabs: [Tab(text: 'Today'), Tab(text: 'This Week'), Tab(text: 'This Month')],
+                      Text('Recent Payments', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
+                      SizedBox(height: 12),
+                      ...DemoMode.getDemoEarnings()['recent_payments'].map<Widget>((payment) => Container(
+                        margin: EdgeInsets.only(bottom: 8),
+                        padding: EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: Offset(0, 2))],
                         ),
-                      ),
-                      SizedBox(height: 20),
-                      SizedBox(
-                        height: 180,
-                        child: TabBarView(
-                          controller: _earningsTabController,
+                        child: Row(
                           children: [
-                            _buildPeriodCard(todayEarnings, todayDeliveries, 'today'),
-                            _buildPeriodCard(weekEarnings, weekDeliveries, 'this week'),
-                            _buildPeriodCard(monthEarnings, monthDeliveries, 'this month'),
+                            Container(
+                              padding: EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: (payment['type'] == 'tip' ? Colors.amber : Color(AppConfig.PRIMARY_COLOR)).withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                payment['type'] == 'tip' ? Icons.card_giftcard : Icons.delivery_dining,
+                                color: payment['type'] == 'tip' ? Colors.amber : Color(AppConfig.PRIMARY_COLOR),
+                                size: 20,
+                              ),
+                            ),
+                            SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(payment['vendor_name'] ?? '', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                                  Text(payment['type'] == 'tip' ? 'Tip' : 'Delivery Fee', style: TextStyle(fontSize: 12, color: Color(AppConfig.TEXT_SECONDARY))),
+                                ],
+                              ),
+                            ),
+                            Text('+KSh ${payment['amount']}',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(AppConfig.SUCCESS_COLOR))),
                           ],
                         ),
-                      ),
-                      SizedBox(height: 20),
-                      Text('Recent Payments', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
-                      SizedBox(height: 12),
-                      ...payments.take(7).map((p) {
-                        final payment = p as Map<String, dynamic>;
-                        final amount = double.tryParse(payment['amount']?.toString() ?? '0') ?? 0;
-                        final isTip = payment['type'] == 'tip';
-                        return Container(
-                          margin: EdgeInsets.only(bottom: 8),
-                          padding: EdgeInsets.all(14),
-                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 40, height: 40,
-                                decoration: BoxDecoration(
-                                  color: (isTip ? Color(AppConfig.ACCENT_COLOR) : Color(AppConfig.SUCCESS_COLOR)).withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(10)),
-                                child: Icon(isTip ? Icons.card_giftcard : Icons.add_circle_outline,
-                                  color: isTip ? Color(AppConfig.ACCENT_COLOR) : Color(AppConfig.SUCCESS_COLOR), size: 20),
-                              ),
-                              SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(payment['vendor_name'] ?? 'Order', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(AppConfig.TEXT_PRIMARY))),
-                                    Text(isTip ? 'Tip' : 'Delivery Fee', style: TextStyle(fontSize: 12, color: Color(AppConfig.TEXT_HINT))),
-                                  ],
-                                ),
-                              ),
-                              Text('+KSh ${amount.toStringAsFixed(0)}',
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(AppConfig.SUCCESS_COLOR))),
-                            ],
-                          ),
-                        );
-                      }),
+                      )),
                     ],
                   ),
                 ),
               );
             }
 
-            Widget _buildEarningChip(IconData icon, String label) {
-              return Container(
-                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(8)),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(icon, color: Colors.white, size: 16),
-                    SizedBox(width: 4),
-                    Text(label, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
-                  ],
-                ),
+            Widget _buildEarningStat(String label, String amount, int deliveries) {
+              return Column(
+                children: [
+                  Text(label, style: TextStyle(color: Colors.white70, fontSize: 11)),
+                  SizedBox(height: 2),
+                  Text(amount, style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                  Text('$deliveries trips', style: TextStyle(color: Colors.white60, fontSize: 10)),
+                ],
               );
             }
 
-            Widget _buildPeriodCard(double earnings, int deliveries, String period) {
-              return Container(
-                padding: EdgeInsets.all(20),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: Offset(0, 2))]),
-                child: Column(
-                  children: [
-                    Text('KSh ${earnings.toStringAsFixed(0)}',
-                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
-                    SizedBox(height: 4),
-                    Text('earned $period', style: TextStyle(fontSize: 14, color: Color(AppConfig.TEXT_SECONDARY))),
-                    SizedBox(height: 20),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Container(
-                            padding: EdgeInsets.all(12),
-                            decoration: BoxDecoration(color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.08), borderRadius: BorderRadius.circular(12)),
-                            child: Column(
-                              children: [
-                                Icon(Icons.motorcycle, color: Color(AppConfig.PRIMARY_COLOR), size: 24),
-                                SizedBox(height: 6),
-                                Text('$deliveries', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(AppConfig.PRIMARY_COLOR))),
-                                SizedBox(height: 2),
-                                Text('Deliveries', style: TextStyle(fontSize: 11, color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.7))),
-                              ],
-                            ),
-                          ),
-                        ),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Container(
-                            padding: EdgeInsets.all(12),
-                            decoration: BoxDecoration(color: Color(AppConfig.ACCENT_COLOR).withOpacity(0.08), borderRadius: BorderRadius.circular(12)),
-                            child: Column(
-                              children: [
-                                Icon(Icons.analytics_outlined, color: Color(AppConfig.ACCENT_COLOR), size: 24),
-                                SizedBox(height: 6),
-                                Text(deliveries > 0 ? 'KSh ${(earnings / deliveries).toStringAsFixed(0)}' : 'KSh 0',
-                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(AppConfig.ACCENT_COLOR))),
-                                SizedBox(height: 2),
-                                Text('Avg/Delivery', style: TextStyle(fontSize: 11, color: Color(AppConfig.ACCENT_COLOR).withOpacity(0.7))),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            // ======== PROFILE TAB ========
             Widget _buildProfileTab() {
               final profile = DemoMode.getDemoRiderProfile();
               return Scaffold(
@@ -1222,197 +1148,167 @@ workflows:
                   elevation: 0.5,
                 ),
                 body: SingleChildScrollView(
+                  physics: AlwaysScrollableScrollPhysics(),
                   padding: EdgeInsets.all(16),
                   child: Column(
                     children: [
                       _buildDemoBanner(),
                       SizedBox(height: 16),
                       Container(
-                        padding: EdgeInsets.all(20),
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: Offset(0, 2))]),
-                        child: Row(
+                        padding: EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10, offset: Offset(0, 4))],
+                        ),
+                        child: Column(
                           children: [
-                            Container(
-                              width: 64, height: 64,
-                              decoration: BoxDecoration(color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
-                              child: Icon(Icons.person, size: 32, color: Color(AppConfig.PRIMARY_COLOR)),
+                            CircleAvatar(
+                              radius: 40,
+                              backgroundColor: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.15),
+                              child: Icon(Icons.person, size: 48, color: Color(AppConfig.PRIMARY_COLOR)),
                             ),
-                            SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(profile['name'] ?? 'Demo Rider',
-                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
-                                  SizedBox(height: 2),
-                                  Text('+254 ${profile['phone'] ?? ''}',
-                                    style: TextStyle(fontSize: 14, color: Color(AppConfig.TEXT_SECONDARY))),
-                                  SizedBox(height: 6),
-                                  Container(
-                                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(color: Color(AppConfig.SUCCESS_COLOR).withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
-                                    child: Text('Verified Rider',
-                                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(AppConfig.SUCCESS_COLOR))),
-                                  ),
-                                ],
-                              ),
+                            SizedBox(height: 12),
+                            Text(profile['name'] ?? '', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
+                            SizedBox(height: 4),
+                            Text(profile['phone'] ?? '', style: TextStyle(fontSize: 14, color: Color(AppConfig.TEXT_SECONDARY))),
+                            SizedBox(height: 16),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                                _buildProfileStat('${profile['total_deliveries']}', 'Deliveries'),
+                                _buildProfileStat('${profile['rating']}', 'Rating'),
+                                _buildProfileStat('${profile['vehicle_type']}', 'Vehicle'),
+                              ],
                             ),
                           ],
                         ),
                       ),
-                      SizedBox(height: 20),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Container(
-                              padding: EdgeInsets.all(16),
-                              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                              child: Column(
-                                children: [
-                                  Icon(Icons.delivery_dining, color: Color(AppConfig.PRIMARY_COLOR), size: 28),
-                                  SizedBox(height: 8),
-                                  Text('${profile['total_deliveries'] ?? 0}',
-                                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(AppConfig.PRIMARY_COLOR))),
-                                  SizedBox(height: 2),
-                                  Text('Deliveries', style: TextStyle(fontSize: 12, color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.7))),
-                                ],
-                              ),
-                            ),
-                          ),
-                          SizedBox(width: 12),
-                          Expanded(
-                            child: Container(
-                              padding: EdgeInsets.all(16),
-                              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                              child: Column(
-                                children: [
-                                  Icon(Icons.star, color: Color(AppConfig.ACCENT_COLOR), size: 28),
-                                  SizedBox(height: 8),
-                                  Text('${profile['rating'] ?? 0.0}',
-                                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(AppConfig.ACCENT_COLOR))),
-                                  SizedBox(height: 2),
-                                  Text('Rating', style: TextStyle(fontSize: 12, color: Color(AppConfig.ACCENT_COLOR).withOpacity(0.7))),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 20),
+                      SizedBox(height: 16),
                       Container(
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                        child: Column(
-                          children: [
-                            _buildMenuItem(Icons.person_outline, 'Personal Information', 'Name, phone, email'),
-                            Divider(height: 1, color: Color(AppConfig.DIVIDER_COLOR), indent: 56),
-                            _buildMenuItem(Icons.motorcycle_outlined, 'Vehicle Details', '${profile['vehicle_type']} - ${profile['vehicle_plate']}'),
-                            Divider(height: 1, color: Color(AppConfig.DIVIDER_COLOR), indent: 56),
-                            _buildMenuItem(Icons.star_outline, 'Ratings and Reviews', '${profile['rating']} average rating'),
-                            Divider(height: 1, color: Color(AppConfig.DIVIDER_COLOR), indent: 56),
-                            _buildMenuItem(Icons.notifications_outlined, 'Notification Settings', 'Manage alerts and sounds'),
-                          ],
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: Offset(0, 2))],
                         ),
-                      ),
-                      SizedBox(height: 12),
-                      Container(
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
                         child: Column(
                           children: [
-                            _buildMenuItem(Icons.help_outline, 'Help and Support', 'Contact support, FAQ'),
-                            Divider(height: 1, color: Color(AppConfig.DIVIDER_COLOR), indent: 56),
-                            _buildMenuItem(Icons.info_outline, 'About KilifiHub Rider', 'Version 1.0.0'),
+                            _buildProfileTile(Icons.email_outlined, 'Email', profile['email'] ?? ''),
+                            Divider(),
+                            _buildProfileTile(Icons.two_wheeler, 'Vehicle Plate', profile['vehicle_plate'] ?? ''),
+                            Divider(),
+                            _buildProfileTile(Icons.verified, 'Status', profile['registration_status'] ?? ''),
                           ],
                         ),
                       ),
                       SizedBox(height: 24),
                       SizedBox(
                         width: double.infinity,
-                        height: 52,
-                        child: ElevatedButton(
+                        height: 50,
+                        child: ElevatedButton.icon(
                           onPressed: () async {
                             await DemoMode.disableGuestMode();
-                            try { Navigator.of(context).pushReplacementNamed('/'); } catch(e) { debugPrint('Nav error'); }
                           },
+                          icon: Icon(Icons.logout),
+                          label: Text('Exit Demo Mode'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Color(AppConfig.ERROR_COLOR),
+                            backgroundColor: Colors.red,
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
-                          child: Text('Exit Demo Mode', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                         ),
                       ),
-                      SizedBox(height: 32),
                     ],
                   ),
                 ),
               );
             }
 
-            Widget _buildMenuItem(IconData icon, String title, String subtitle) {
-              return InkWell(
-                onTap: () {},
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding: EdgeInsets.all(14),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 36, height: 36,
-                        decoration: BoxDecoration(color: Color(AppConfig.BACKGROUND_COLOR), borderRadius: BorderRadius.circular(10)),
-                        child: Icon(icon, size: 18, color: Color(AppConfig.TEXT_SECONDARY)),
+            Widget _buildProfileStat(String value, String label) {
+              return Column(
+                children: [
+                  Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(AppConfig.PRIMARY_COLOR))),
+                  SizedBox(height: 2),
+                  Text(label, style: TextStyle(fontSize: 12, color: Color(AppConfig.TEXT_SECONDARY))),
+                ],
+              );
+            }
+
+            Widget _buildProfileTile(IconData icon, String title, String value) {
+              return Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Icon(icon, color: Color(AppConfig.PRIMARY_COLOR), size: 22),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(title, style: TextStyle(fontSize: 12, color: Color(AppConfig.TEXT_SECONDARY))),
+                          Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                        ],
                       ),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(AppConfig.TEXT_PRIMARY))),
-                            if (subtitle.isNotEmpty)
-                              Text(subtitle, style: TextStyle(fontSize: 12, color: Color(AppConfig.TEXT_HINT))),
-                          ],
-                        ),
-                      ),
-                      Icon(Icons.chevron_right, color: Color(AppConfig.TEXT_HINT), size: 20),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               );
             }
 
-            // ======== BOTTOM NAVIGATION ========
             Widget _buildBottomNav() {
               return Container(
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: Offset(0, -2)),
-                  ],
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10, offset: Offset(0, -2))],
                 ),
-                child: NavigationBar(
-                  selectedIndex: _currentIndex,
-                  onDestinationSelected: (index) => setState(() => _currentIndex = index),
-                  backgroundColor: Colors.white,
-                  indicatorColor: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.1),
-                  height: 64,
-                  destinations: [
-                    NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-                    NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), selectedIcon: Icon(Icons.account_balance_wallet), label: 'Earnings'),
-                    NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
-                  ],
+                child: SafeArea(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildNavItem(Icons.home_outlined, 'Home', 0),
+                        _buildNavItem(Icons.account_balance_wallet_outlined, 'Earnings', 1),
+                        _buildNavItem(Icons.person_outline, 'Profile', 2),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            Widget _buildNavItem(IconData icon, String label, int index) {
+              final isSelected = _currentIndex == index;
+              return GestureDetector(
+                onTap: () => setState(() => _currentIndex = index),
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: isSelected
+                      ? BoxDecoration(
+                          color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        )
+                      : null,
+                  child: Row(
+                    children: [
+                      Icon(icon, color: isSelected ? Color(AppConfig.PRIMARY_COLOR) : Color(AppConfig.TEXT_SECONDARY), size: 22),
+                      if (isSelected) ...[
+                        SizedBox(width: 6),
+                        Text(label, style: TextStyle(color: Color(AppConfig.PRIMARY_COLOR), fontSize: 12, fontWeight: FontWeight.w600)),
+                      ],
+                    ],
+                  ),
                 ),
               );
             }
           }
-          DARTEOF
-          echo "Created guest_home_screen.dart"
+          """
 
+          with open("lib/screens/guest_home_screen.dart", "w") as f:
+              f.write(guest_home_content)
+          print("Created lib/screens/guest_home_screen.dart")
 
-      - name: Patch main.dart for demo mode
-        script: |
-          echo "=== Patching main.dart for demo mode ==="
-
-          python3 << 'PYEOF'
           # === 3. Patch main.dart to integrate demo mode ===
           main_path = "lib/main.dart"
           with open(main_path, 'r') as f:
