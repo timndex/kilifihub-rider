@@ -310,6 +310,1316 @@ workflows:
       - name: Re-get packages after pubspec fix
         script: flutter pub get
 
+      - name: Add Demo/Guest Mode and fix connectivity for offline browsing
+        script: |
+          set -e
+          echo "Adding Demo/Guest Mode for Rider App..."
+
+          python3 << 'PYEOF'
+          import os, re
+
+          # ============================================================
+          # CREATE: lib/utils/demo_mode.dart
+          # ============================================================
+          utils_dir = "lib/utils"
+          os.makedirs(utils_dir, exist_ok=True)
+          demo_mode_path = os.path.join(utils_dir, "demo_mode.dart")
+
+          if not os.path.exists(demo_mode_path):
+              demo_mode_code = r"""import 'dart:io';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class DemoMode {
+  static const String _keyIsGuest = 'rider_is_guest_mode';
+  static const String _keyUserToken = 'auth_token';
+  static const String _keyUserId = 'rider_id';
+  static const String _keyUserName = 'rider_name';
+  static const String _keyUserPhone = 'rider_phone';
+
+  static bool _isGuest = false;
+  static bool get isGuest => _isGuest;
+
+  static Future<void> enableGuestMode() async {
+    _isGuest = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyIsGuest, true);
+    await prefs.setString(_keyUserToken, 'demo_rider_token_99999');
+    await prefs.setInt(_keyUserId, 99);
+    await prefs.setString(_keyUserName, 'Demo Rider');
+    await prefs.setString(_keyUserPhone, '0712345678');
+  }
+
+  static Future<void> disableGuestMode() async {
+    _isGuest = false;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyIsGuest);
+    await prefs.remove(_keyUserToken);
+    await prefs.remove(_keyUserId);
+    await prefs.remove(_keyUserName);
+    await prefs.remove(_keyUserPhone);
+  }
+
+  static Future<bool> checkGuestMode() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _isGuest = prefs.getBool(_keyIsGuest) ?? false;
+    } catch (e) {
+      _isGuest = false;
+    }
+    return _isGuest;
+  }
+
+  static Future<bool> isServerReachable() async {
+    try {
+      final socket = await Socket.connect('ats.unaux.com', 443, timeout: Duration(seconds: 3));
+      socket.destroy();
+      return true;
+    } catch (e) {
+      try {
+        final socket = await Socket.connect('ats.unaux.com', 80, timeout: Duration(seconds: 3));
+        socket.destroy();
+        return true;
+      } catch (e2) {
+        return false;
+      }
+    }
+  }
+
+  static Future<String?> getToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_keyUserToken);
+    } catch (e) { return null; }
+  }
+
+  static Future<int?> getUserId() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getInt(_keyUserId);
+    } catch (e) { return null; }
+  }
+
+  // Demo Rider Profile
+  static Map<String, dynamic> getDemoRiderProfile() => {
+    'id': 99,
+    'name': 'Demo Rider',
+    'phone': '0712345678',
+    'email': 'demo.rider@kilifihub.co.ke',
+    'avatar_url': '',
+    'is_online': false,
+    'vehicle_type': 'Motorcycle',
+    'vehicle_plate': 'KBA 123J',
+    'rating': 4.7,
+    'total_deliveries': 156,
+    'registration_status': 'approved',
+    'device_token': '',
+  };
+
+  // Demo Active Orders
+  static List<Map<String, dynamic>> getDemoActiveOrders() => [
+    {
+      'id': 5001,
+      'order_number': 'KH-5001',
+      'status': 'rider-accepted',
+      'date_created': DateTime.now().subtract(Duration(minutes: 15)).toIso8601String(),
+      'total': '850.00',
+      'currency': 'KES',
+      'payment_method_title': 'M-Pesa',
+      'vendor': {
+        'id': 1,
+        'name': 'Kilifi Fresh Kitchen',
+        'address': 'Kilifi Town Center, Mombasa Road',
+        'latitude': '-3.6330',
+        'longitude': '39.8490',
+        'phone': '+254700000001',
+      },
+      'customer': {
+        'name': 'Alice Mwangi',
+        'phone': '0722123456',
+        'address': 'Mnarani Estate, House No. 4',
+        'latitude': '-3.6280',
+        'longitude': '39.8520',
+        'notes': 'Call when at the gate',
+      },
+      'delivery': {
+        'delivery_fee': '120.00',
+        'distance': '3.5',
+        'estimated_time': '15 min',
+      },
+      'items': [
+        {'name': 'Chicken Biryani', 'quantity': 2, 'price': '350.00'},
+        {'name': 'Soda 500ml', 'quantity': 2, 'price': '50.00'},
+      ],
+    },
+    {
+      'id': 5002,
+      'order_number': 'KH-5002',
+      'status': 'rider-picked-up',
+      'date_created': DateTime.now().subtract(Duration(minutes: 35)).toIso8601String(),
+      'total': '430.00',
+      'currency': 'KES',
+      'payment_method_title': 'Cash on Delivery',
+      'vendor': {
+        'id': 2,
+        'name': 'Coastal Goods Store',
+        'address': 'Mombasa Road, Kilifi',
+        'latitude': '-3.6350',
+        'longitude': '39.8470',
+        'phone': '+254700000002',
+      },
+      'customer': {
+        'name': 'John Karisa',
+        'phone': '0733456789',
+        'address': 'Bofa Road, Near Beach',
+        'latitude': '-3.6400',
+        'longitude': '39.8550',
+        'notes': '',
+      },
+      'delivery': {
+        'delivery_fee': '100.00',
+        'distance': '4.2',
+        'estimated_time': '20 min',
+      },
+      'items': [
+        {'name': 'Maize Flour 2kg', 'quantity': 1, 'price': '180.00'},
+        {'name': 'Cooking Oil 1L', 'quantity': 1, 'price': '250.00'},
+      ],
+    },
+    {
+      'id': 5003,
+      'order_number': 'KH-5003',
+      'status': 'courier-assignment',
+      'date_created': DateTime.now().subtract(Duration(minutes: 2)).toIso8601String(),
+      'total': '1200.00',
+      'currency': 'KES',
+      'payment_method_title': 'M-Pesa',
+      'vendor': {
+        'id': 3,
+        'name': 'Mnarani Supplies',
+        'address': 'Mnarani, Kilifi',
+        'latitude': '-3.6290',
+        'longitude': '39.8510',
+        'phone': '+254700000003',
+      },
+      'customer': {
+        'name': 'Fatima Hamisi',
+        'phone': '0744567890',
+        'address': 'Kilifi Creek Road, Villa 12',
+        'latitude': '-3.6310',
+        'longitude': '39.8480',
+        'notes': 'Ring doorbell twice',
+      },
+      'delivery': {
+        'delivery_fee': '150.00',
+        'distance': '5.0',
+        'estimated_time': '25 min',
+      },
+      'items': [
+        {'name': 'Rice 5kg', 'quantity': 1, 'price': '650.00'},
+        {'name': 'Sugar 2kg', 'quantity': 1, 'price': '340.00'},
+        {'name': 'Tea Leaves', 'quantity': 1, 'price': '60.00'},
+      ],
+    },
+  ];
+
+  // Demo Earnings
+  static Map<String, dynamic> getDemoEarnings() => {
+    'today_earnings': '680.00',
+    'week_earnings': '4200.00',
+    'month_earnings': '18500.00',
+    'today_deliveries': 5,
+    'week_deliveries': 32,
+    'month_deliveries': 148,
+    'daily_breakdown': [
+      {'date': DateTime.now().subtract(Duration(days: 0)).toIso8601String().split('T')[0], 'earnings': '680.00', 'deliveries': 5},
+      {'date': DateTime.now().subtract(Duration(days: 1)).toIso8601String().split('T')[0], 'earnings': '920.00', 'deliveries': 7},
+      {'date': DateTime.now().subtract(Duration(days: 2)).toIso8601String().split('T')[0], 'earnings': '540.00', 'deliveries': 4},
+      {'date': DateTime.now().subtract(Duration(days: 3)).toIso8601String().split('T')[0], 'earnings': '780.00', 'deliveries': 6},
+      {'date': DateTime.now().subtract(Duration(days: 4)).toIso8601String().split('T')[0], 'earnings': '640.00', 'deliveries': 5},
+      {'date': DateTime.now().subtract(Duration(days: 5)).toIso8601String().split('T')[0], 'earnings': '460.00', 'deliveries': 3},
+      {'date': DateTime.now().subtract(Duration(days: 6)).toIso8601String().split('T')[0], 'earnings': '180.00', 'deliveries': 2},
+    ],
+    'recent_payments': [
+      {'order_id': 5003, 'amount': '150.00', 'date': DateTime.now().subtract(Duration(minutes: 5)).toIso8601String(), 'type': 'delivery_fee', 'vendor_name': 'Mnarani Supplies'},
+      {'order_id': 5002, 'amount': '100.00', 'date': DateTime.now().subtract(Duration(minutes: 35)).toIso8601String(), 'type': 'delivery_fee', 'vendor_name': 'Coastal Goods Store'},
+      {'order_id': 5001, 'amount': '120.00', 'date': DateTime.now().subtract(Duration(hours: 1)).toIso8601String(), 'type': 'delivery_fee', 'vendor_name': 'Kilifi Fresh Kitchen'},
+      {'order_id': 4998, 'amount': '90.00', 'date': DateTime.now().subtract(Duration(hours: 3)).toIso8601String(), 'type': 'delivery_fee', 'vendor_name': 'Kilifi Fresh Market'},
+      {'order_id': 4996, 'amount': '110.00', 'date': DateTime.now().subtract(Duration(hours: 5)).toIso8601String(), 'type': 'delivery_fee', 'vendor_name': 'Coastal Goods Store'},
+      {'order_id': 4995, 'amount': '50.00', 'date': DateTime.now().subtract(Duration(hours: 6)).toIso8601String(), 'type': 'tip', 'vendor_name': 'Happy Customer'},
+      {'order_id': 4993, 'amount': '60.00', 'date': DateTime.now().subtract(Duration(days: 1, hours: 2)).toIso8601String(), 'type': 'delivery_fee', 'vendor_name': 'Mnarani Supplies'},
+    ],
+  };
+
+  static Map<String, dynamic> getDemoResponse(String endpoint) {
+    if (endpoint.contains('earning')) return getDemoEarnings();
+    if (endpoint.contains('order')) return {'data': getDemoActiveOrders()};
+    if (endpoint.contains('profile') || endpoint.contains('rider')) return getDemoRiderProfile();
+    if (endpoint.contains('vendor') || endpoint.contains('store')) return {'data': []};
+    return {'data': []};
+  }
+}
+"""
+              with open(demo_mode_path, 'w') as f:
+                  f.write(demo_mode_code)
+              print("Created: demo_mode.dart")
+          else:
+              print("demo_mode.dart already exists")
+
+          # ============================================================
+          # CREATE: lib/screens/guest_home_screen.dart
+          # Standalone rider home screen that works entirely offline.
+          # ============================================================
+          guest_home_path = "lib/screens/guest_home_screen.dart"
+
+          if not os.path.exists(guest_home_path):
+              guest_code = r"""import 'package:flutter/material.dart';
+import '../utils/demo_mode.dart';
+import '../config/app_config.dart';
+
+class GuestHomeScreen extends StatefulWidget {
+  const GuestHomeScreen({Key? key}) : super(key: key);
+  @override
+  State<GuestHomeScreen> createState() => _GuestHomeScreenState();
+}
+
+class _GuestHomeScreenState extends State<GuestHomeScreen> with SingleTickerProviderStateMixin {
+  int _currentIndex = 0;
+  bool _isOnline = false;
+  late TabController _earningsTabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _earningsTabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _earningsTabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          _buildHomeTab(),
+          _buildEarningsTab(),
+          _buildProfileTab(),
+        ],
+      ),
+      bottomNavigationBar: _buildBottomNav(),
+    );
+  }
+
+  // ============================================================
+  // HOME TAB
+  // ============================================================
+  Widget _buildHomeTab() {
+    final orders = DemoMode.getDemoActiveOrders();
+    return SafeArea(
+      child: Column(
+        children: [
+          // Header with Go Live toggle
+          _buildHeader(),
+          // Orders
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () async => setState(() {}),
+              color: Color(AppConfig.PRIMARY_COLOR),
+              child: CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
+                      child: Row(
+                        children: [
+                          Text('Active Orders',
+                            style: TextStyle(
+                              fontSize: AppConfig.FONT_SIZE_LARGE,
+                              fontWeight: FontWeight.bold,
+                              color: Color(AppConfig.TEXT_PRIMARY),
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Color(AppConfig.PRIMARY_COLOR),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text('${orders.length}',
+                              style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: EdgeInsets.all(20),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final order = orders[index];
+                          return Padding(
+                            padding: EdgeInsets.only(bottom: 12),
+                            child: _buildDemoOrderCard(order),
+                          );
+                        },
+                        childCount: orders.length,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      padding: EdgeInsets.fromLTRB(20, 16, 20, 20),
+      decoration: BoxDecoration(
+        color: _isOnline
+            ? Color(AppConfig.SUCCESS_COLOR).withOpacity(0.08)
+            : Color(AppConfig.BACKGROUND_COLOR),
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(24),
+          bottomRight: Radius.circular(24),
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _isOnline ? "You're Online" : "You're Offline",
+                      style: TextStyle(
+                        fontSize: AppConfig.FONT_SIZE_SMALL,
+                        color: _isOnline ? Color(AppConfig.SUCCESS_COLOR) : Color(AppConfig.TEXT_SECONDARY),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text('Hi, Demo Rider!',
+                      style: TextStyle(
+                        fontSize: AppConfig.FONT_SIZE_XLARGE,
+                        fontWeight: FontWeight.bold,
+                        color: Color(AppConfig.TEXT_PRIMARY),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.15),
+                child: Icon(Icons.person, color: Color(AppConfig.PRIMARY_COLOR), size: 28),
+              ),
+            ],
+          ),
+          SizedBox(height: 20),
+          // Demo Banner
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade700,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.wifi_off, color: Colors.white, size: 16),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text('Demo Mode - Server Unavailable',
+                    style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: 12),
+          // Go Live Toggle (demo)
+          GestureDetector(
+            onTap: () => setState(() => _isOnline = !_isOnline),
+            child: Container(
+              height: 56,
+              decoration: BoxDecoration(
+                color: _isOnline ? Color(AppConfig.SUCCESS_COLOR) : Color(AppConfig.PRIMARY_COLOR),
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color: (_isOnline ? Color(AppConfig.SUCCESS_COLOR) : Color(AppConfig.PRIMARY_COLOR)).withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Center(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      _isOnline ? Icons.power_settings_new : Icons.play_arrow,
+                      color: Colors.white, size: 24),
+                    SizedBox(width: 8),
+                    Text(
+                      _isOnline ? 'Go Offline' : 'Go Live',
+                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDemoOrderCard(Map<String, dynamic> order) {
+    final status = order['status'] as String? ?? '';
+    final vendor = order['vendor'] as Map<String, dynamic>? ?? {};
+    final customer = order['customer'] as Map<String, dynamic>? ?? {};
+    final items = order['items'] as List<dynamic>? ?? [];
+    final delivery = order['delivery'] as Map<String, dynamic>? ?? {};
+
+    Color statusColor;
+    String statusLabel;
+    switch (status) {
+      case 'courier-assignment':
+        statusColor = Color(AppConfig.ACCENT_COLOR);
+        statusLabel = 'New Order';
+        break;
+      case 'rider-accepted':
+        statusColor = Color(0xFF2196F3);
+        statusLabel = 'Accepted';
+        break;
+      case 'rider-picked-up':
+        statusColor = Color(AppConfig.PRIMARY_COLOR);
+        statusLabel = 'Picked Up';
+        break;
+      case 'rider-on-the-way':
+        statusColor = Color(AppConfig.PRIMARY_COLOR);
+        statusLabel = 'On The Way';
+        break;
+      default:
+        statusColor = Color(AppConfig.TEXT_SECONDARY);
+        statusLabel = status;
+    }
+
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10, offset: Offset(0, 3)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('#${order['order_number']}',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(AppConfig.TEXT_PRIMARY))),
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(statusLabel,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
+              ),
+            ],
+          ),
+          SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(Icons.store_outlined, size: 16, color: Color(AppConfig.ACCENT_COLOR)),
+              SizedBox(width: 6),
+              Expanded(child: Text(vendor['name'] ?? '',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(AppConfig.TEXT_PRIMARY)),
+                maxLines: 1, overflow: TextOverflow.ellipsis)),
+            ],
+          ),
+          SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(Icons.location_on_outlined, size: 16, color: Color(AppConfig.PRIMARY_COLOR)),
+              SizedBox(width: 6),
+              Expanded(child: Text(customer['address'] ?? customer['name'] ?? '',
+                style: TextStyle(fontSize: 13, color: Color(AppConfig.TEXT_SECONDARY)),
+                maxLines: 1, overflow: TextOverflow.ellipsis)),
+            ],
+          ),
+          SizedBox(height: 12),
+          Row(
+            children: [
+              Text('${items.length} item${items.length != 1 ? 's' : ''}',
+                style: TextStyle(fontSize: 12, color: Color(AppConfig.TEXT_HINT))),
+              Spacer(),
+              Text('KSh ${delivery['delivery_fee'] ?? '0'} fee',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(AppConfig.SUCCESS_COLOR))),
+              SizedBox(width: 8),
+              Text('KSh ${order['total'] ?? '0'}',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // EARNINGS TAB
+  // ============================================================
+  Widget _buildEarningsTab() {
+    final earnings = DemoMode.getDemoEarnings();
+    final todayEarnings = double.tryParse(earnings['today_earnings']?.toString() ?? '0') ?? 0;
+    final weekEarnings = double.tryParse(earnings['week_earnings']?.toString() ?? '0') ?? 0;
+    final monthEarnings = double.tryParse(earnings['month_earnings']?.toString() ?? '0') ?? 0;
+    final todayDeliveries = earnings['today_deliveries'] as int? ?? 0;
+    final weekDeliveries = earnings['week_deliveries'] as int? ?? 0;
+    final monthDeliveries = earnings['month_deliveries'] as int? ?? 0;
+    final payments = earnings['recent_payments'] as List<dynamic>? ?? [];
+
+    return Scaffold(
+      backgroundColor: Color(AppConfig.BACKGROUND_COLOR),
+      appBar: AppBar(
+        title: Text('Earnings'),
+        backgroundColor: Colors.white,
+        foregroundColor: Color(AppConfig.TEXT_PRIMARY),
+        elevation: 0.5,
+      ),
+      body: SingleChildScrollView(
+        physics: AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Demo banner
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade700,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.wifi_off, color: Colors.white, size: 16),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text('Demo Mode - Sample Data',
+                      style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 16),
+
+            // Hero Card
+            Container(
+              padding: EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(AppConfig.PRIMARY_COLOR), Color(0xFFFF6B6B)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.3),
+                    blurRadius: 16, offset: Offset(0, 6)),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("Today's Earnings", style: TextStyle(color: Colors.white70, fontSize: 14)),
+                  SizedBox(height: 4),
+                  Text('KSh ${todayEarnings.toStringAsFixed(0)}',
+                    style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
+                  SizedBox(height: 16),
+                  Row(
+                    children: [
+                      _buildEarningChip(Icons.delivery_dining, '$todayDeliveries deliveries'),
+                      SizedBox(width: 12),
+                      _buildEarningChip(Icons.trending_up,
+                        todayEarnings > 0 ? 'KSh ${(todayEarnings / (todayDeliveries > 0 ? todayDeliveries : 1)).toStringAsFixed(0)}/delivery' : 'No deliveries yet'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 20),
+
+            // Period tabs
+            Container(
+              height: 44,
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+              child: TabBar(
+                controller: _earningsTabController,
+                labelColor: Colors.white,
+                unselectedLabelColor: Color(AppConfig.TEXT_SECONDARY),
+                indicatorSize: TabBarIndicatorSize.tab,
+                indicator: BoxDecoration(
+                  color: Color(AppConfig.PRIMARY_COLOR),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                dividerColor: Colors.transparent,
+                tabs: [
+                  Tab(text: 'Today'),
+                  Tab(text: 'This Week'),
+                  Tab(text: 'This Month'),
+                ],
+              ),
+            ),
+            SizedBox(height: 20),
+
+            SizedBox(
+              height: 180,
+              child: TabBarView(
+                controller: _earningsTabController,
+                children: [
+                  _buildPeriodCard(todayEarnings, todayDeliveries, 'today'),
+                  _buildPeriodCard(weekEarnings, weekDeliveries, 'this week'),
+                  _buildPeriodCard(monthEarnings, monthDeliveries, 'this month'),
+                ],
+              ),
+            ),
+            SizedBox(height: 20),
+
+            // Recent Payments
+            Text('Recent Payments',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
+            SizedBox(height: 12),
+            ...payments.take(7).map((p) {
+              final payment = p as Map<String, dynamic>;
+              final amount = double.tryParse(payment['amount']?.toString() ?? '0') ?? 0;
+              final isTip = payment['type'] == 'tip';
+              return Container(
+                margin: EdgeInsets.only(bottom: 8),
+                padding: EdgeInsets.all(14),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40, height: 40,
+                      decoration: BoxDecoration(
+                        color: (isTip ? Color(AppConfig.ACCENT_COLOR) : Color(AppConfig.SUCCESS_COLOR)).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10)),
+                      child: Icon(
+                        isTip ? Icons.card_giftcard : Icons.add_circle_outline,
+                        color: isTip ? Color(AppConfig.ACCENT_COLOR) : Color(AppConfig.SUCCESS_COLOR), size: 20),
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(payment['vendor_name'] ?? 'Order #${payment['order_id']}',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(AppConfig.TEXT_PRIMARY))),
+                          Text(isTip ? 'Tip' : 'Delivery Fee',
+                            style: TextStyle(fontSize: 12, color: Color(AppConfig.TEXT_HINT))),
+                        ],
+                      ),
+                    ),
+                    Text('+KSh ${amount.toStringAsFixed(0)}',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(AppConfig.SUCCESS_COLOR))),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEarningChip(IconData icon, String label) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(8)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 16),
+          SizedBox(width: 4),
+          Text(label, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPeriodCard(double earnings, int deliveries, String period) {
+    return Container(
+      padding: EdgeInsets.all(20),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: Offset(0, 2))]),
+      child: Column(
+        children: [
+          Text('KSh ${earnings.toStringAsFixed(0)}',
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
+          SizedBox(height: 4),
+          Text('earned $period',
+            style: TextStyle(fontSize: 14, color: Color(AppConfig.TEXT_SECONDARY))),
+          SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12)),
+                  child: Column(
+                    children: [
+                      Icon(Icons.motorcycle, color: Color(AppConfig.PRIMARY_COLOR), size: 24),
+                      SizedBox(height: 6),
+                      Text('$deliveries', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(AppConfig.PRIMARY_COLOR))),
+                      SizedBox(height: 2),
+                      Text('Deliveries', style: TextStyle(fontSize: 11, color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.7))),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Color(AppConfig.ACCENT_COLOR).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12)),
+                  child: Column(
+                    children: [
+                      Icon(Icons.analytics_outlined, color: Color(AppConfig.ACCENT_COLOR), size: 24),
+                      SizedBox(height: 6),
+                      Text(deliveries > 0 ? 'KSh ${(earnings / deliveries).toStringAsFixed(0)}' : 'KSh 0',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(AppConfig.ACCENT_COLOR))),
+                      SizedBox(height: 2),
+                      Text('Avg/Delivery', style: TextStyle(fontSize: 11, color: Color(AppConfig.ACCENT_COLOR).withOpacity(0.7))),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // PROFILE TAB
+  // ============================================================
+  Widget _buildProfileTab() {
+    final profile = DemoMode.getDemoRiderProfile();
+    return Scaffold(
+      backgroundColor: Color(AppConfig.BACKGROUND_COLOR),
+      appBar: AppBar(
+        title: Text('Profile'),
+        backgroundColor: Colors.white,
+        foregroundColor: Color(AppConfig.TEXT_PRIMARY),
+        elevation: 0.5,
+      ),
+      body: SingleChildScrollView(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          children: [
+            // Demo banner
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade700,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.wifi_off, color: Colors.white, size: 16),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text('Demo Mode - Server Unavailable',
+                      style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 16),
+
+            // Profile Card
+            Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: Offset(0, 2))],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 64, height: 64,
+                    decoration: BoxDecoration(
+                      color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20)),
+                    child: Icon(Icons.person, size: 32, color: Color(AppConfig.PRIMARY_COLOR)),
+                  ),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(profile['name'] ?? 'Demo Rider',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(AppConfig.TEXT_PRIMARY))),
+                        SizedBox(height: 2),
+                        Text('+254 ${profile['phone'] ?? ''}',
+                          style: TextStyle(fontSize: 14, color: Color(AppConfig.TEXT_SECONDARY))),
+                        SizedBox(height: 6),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Color(AppConfig.SUCCESS_COLOR).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(6)),
+                          child: Text('Verified Rider',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(AppConfig.SUCCESS_COLOR))),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 20),
+
+            // Stats Row
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                    child: Column(
+                      children: [
+                        Icon(Icons.delivery_dining, color: Color(AppConfig.PRIMARY_COLOR), size: 28),
+                        SizedBox(height: 8),
+                        Text('${profile['total_deliveries'] ?? 0}',
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(AppConfig.PRIMARY_COLOR))),
+                        SizedBox(height: 2),
+                        Text('Deliveries', style: TextStyle(fontSize: 12, color: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.7))),
+                      ],
+                    ),
+                  ),
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                    child: Column(
+                      children: [
+                        Icon(Icons.star, color: Color(AppConfig.ACCENT_COLOR), size: 28),
+                        SizedBox(height: 8),
+                        Text('${profile['rating'] ?? 0.0}',
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(AppConfig.ACCENT_COLOR))),
+                        SizedBox(height: 2),
+                        Text('Rating', style: TextStyle(fontSize: 12, color: Color(AppConfig.ACCENT_COLOR).withOpacity(0.7))),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 20),
+
+            // Menu Items
+            Container(
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                children: [
+                  _buildMenuItem(Icons.person_outline, 'Personal Information', 'Name, phone, email'),
+                  Divider(height: 1, color: Color(AppConfig.DIVIDER_COLOR), indent: 56),
+                  _buildMenuItem(Icons.motorcycle_outlined, 'Vehicle Details', '${profile['vehicle_type']} · ${profile['vehicle_plate']}'),
+                  Divider(height: 1, color: Color(AppConfig.DIVIDER_COLOR), indent: 56),
+                  _buildMenuItem(Icons.star_outline, 'Ratings & Reviews', '${profile['rating']} average rating'),
+                  Divider(height: 1, color: Color(AppConfig.DIVIDER_COLOR), indent: 56),
+                  _buildMenuItem(Icons.notifications_outlined, 'Notification Settings', 'Manage alerts and sounds'),
+                ],
+              ),
+            ),
+            SizedBox(height: 12),
+            Container(
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                children: [
+                  _buildMenuItem(Icons.help_outline, 'Help & Support', 'Contact support, FAQ'),
+                  Divider(height: 1, color: Color(AppConfig.DIVIDER_COLOR), indent: 56),
+                  _buildMenuItem(Icons.info_outline, 'About KilifiHub Rider', 'Version 1.0.0'),
+                ],
+              ),
+            ),
+            SizedBox(height: 24),
+
+            // Exit Demo Button
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton(
+                onPressed: () async {
+                  await DemoMode.disableGuestMode();
+                  try { Navigator.of(context).pushReplacementNamed('/'); } catch(e) { debugPrint('Nav error: $e'); }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Color(AppConfig.ERROR_COLOR),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: Text('Exit Demo Mode', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              ),
+            ),
+            SizedBox(height: 32),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuItem(IconData icon, String title, String subtitle) {
+    return InkWell(
+      onTap: () {},
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: Color(AppConfig.BACKGROUND_COLOR),
+                borderRadius: BorderRadius.circular(10)),
+              child: Icon(icon, size: 18, color: Color(AppConfig.TEXT_SECONDARY)),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(AppConfig.TEXT_PRIMARY))),
+                  if (subtitle.isNotEmpty)
+                    Text(subtitle, style: TextStyle(fontSize: 12, color: Color(AppConfig.TEXT_HINT))),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: Color(AppConfig.TEXT_HINT), size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // BOTTOM NAVIGATION
+  // ============================================================
+  Widget _buildBottomNav() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: Offset(0, -2)),
+        ],
+      ),
+      child: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (index) => setState(() => _currentIndex = index),
+        backgroundColor: Colors.white,
+        indicatorColor: Color(AppConfig.PRIMARY_COLOR).withOpacity(0.1),
+        height: 64,
+        destinations: [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.account_balance_wallet_outlined),
+            selectedIcon: Icon(Icons.account_balance_wallet),
+            label: 'Earnings',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: 'Profile',
+          ),
+        ],
+      ),
+    );
+  }
+}
+"""
+              with open(guest_home_path, 'w') as f:
+                  f.write(guest_code)
+              print("Created: guest_home_screen.dart")
+          else:
+              print("guest_home_screen.dart already exists")
+
+          # ============================================================
+          # PATCH: lib/main.dart
+          # Add demo mode auto-detect, guest route, error handlers
+          # ============================================================
+          main_file = "lib/main.dart"
+          if os.path.exists(main_file):
+              with open(main_file, 'r') as f:
+                  content = f.read()
+
+              # Add imports
+              if "demo_mode.dart" not in content:
+                  content = "import 'utils/demo_mode.dart';\n" + content
+                  print("Added demo_mode import to main.dart")
+              if "guest_home_screen.dart" not in content:
+                  content = "import 'screens/guest_home_screen.dart';\n" + content
+                  print("Added guest_home_screen import to main.dart")
+
+              # Make main() async if not already
+              if "void main() async" not in content:
+                  content = content.replace("void main() {", "void main() async {")
+                  print("Made main() async")
+
+              # Add WidgetsFlutterBinding.ensureInitialized() if not present
+              if "WidgetsFlutterBinding.ensureInitialized()" not in content:
+                  content = content.replace(
+                      "void main() async {",
+                      "void main() async {\n  WidgetsFlutterBinding.ensureInitialized();"
+                  )
+                  print("Added ensureInitialized to main()")
+
+              # Add global error handler - PREVENTS black screen on crashes
+              if "FlutterError.onError" not in content:
+                  content = content.replace(
+                      "WidgetsFlutterBinding.ensureInitialized();",
+                      "WidgetsFlutterBinding.ensureInitialized();\n"
+                      "  FlutterError.onError = (details) {\n"
+                      "    debugPrint('FlutterError: ${details.exceptionAsString()}');\n"
+                      "  };"
+                  )
+                  print("Added FlutterError.onError handler")
+
+              # Add platform error handler too
+              if "FlutterError.onError" in content and "PlatformDispatcher" not in content:
+                  flutter_error_block = (
+                      "  FlutterError.onError = (details) {\n"
+                      "    debugPrint('FlutterError: ${details.exceptionAsString()}');\n"
+                      "  };"
+                  )
+                  platform_error_block = (
+                      "  FlutterError.onError = (details) {\n"
+                      "    debugPrint('FlutterError: ${details.exceptionAsString()}');\n"
+                      "  };\n"
+                      "  PlatformDispatcher.instance.onError = (error, stack) {\n"
+                      "    debugPrint('PlatformError: $error');\n"
+                      "    return true;\n"
+                      "  };"
+                  )
+                  if flutter_error_block in content and platform_error_block not in content:
+                      content = content.replace(flutter_error_block, platform_error_block)
+                      print("Added PlatformDispatcher.onError handler")
+
+              # Add import for PlatformDispatcher if needed
+              if "PlatformDispatcher" in content and "dart:ui" not in content:
+                  content = "import 'dart:ui';\n" + content
+                  print("Added dart:ui import for PlatformDispatcher")
+
+              # Comment out Firebase initialization (server is down)
+              if "await Firebase.initializeApp" in content and "// await Firebase.initializeApp" not in content:
+                  content = content.replace(
+                      "await Firebase.initializeApp",
+                      "// await Firebase.initializeApp"
+                  )
+                  print("Commented out Firebase.initializeApp")
+
+              # Comment out Firebase import
+              if "import 'firebase_options.dart'" in content and "// import 'firebase_options.dart'" not in content:
+                  content = content.replace(
+                      "import 'firebase_options.dart';",
+                      "// import 'firebase_options.dart';"
+                  )
+                  print("Commented out firebase_options import")
+
+              # Comment out LocationService initialize (needs server)
+              if "await LocationService.initializeBackgroundService" in content and "// await LocationService.initializeBackgroundService" not in content:
+                  content = content.replace(
+                      "await LocationService.initializeBackgroundService",
+                      "// await LocationService.initializeBackgroundService"
+                  )
+                  print("Commented out LocationService.initializeBackgroundService")
+
+              # Comment out PushNotificationService initialize (needs Firebase)
+              if "await PushNotificationService.instance.initialize" in content and "// await PushNotificationService.instance.initialize" not in content:
+                  content = content.replace(
+                      "await PushNotificationService.instance.initialize",
+                      "// await PushNotificationService.instance.initialize"
+                  )
+                  print("Commented out PushNotificationService.instance.initialize")
+
+              # Add demo mode check and server auto-detect BEFORE runApp
+              if "await DemoMode.checkGuestMode()" not in content:
+                  # Find the runApp line and insert demo mode check before it
+                  content = content.replace(
+                      "  runApp(const KilifiHubRiderApp());",
+                      "  // Demo mode: check server reachability\n"
+                      "  await DemoMode.checkGuestMode();\n"
+                      "  if (!DemoMode.isGuest) {\n"
+                      "    final reachable = await DemoMode.isServerReachable();\n"
+                      "    if (!reachable) {\n"
+                      "      await DemoMode.enableGuestMode();\n"
+                      "    }\n"
+                      "  }\n"
+                      "  runApp(const KilifiHubRiderApp());"
+                  )
+                  print("Added demo mode check before runApp")
+
+              # Modify AuthWrapper to show GuestHomeScreen when in guest mode
+              if "DemoMode.isGuest" not in content or "GuestHomeScreen" not in content.split("class AuthWrapper")[1] if "class AuthWrapper" in content else "":
+                  # Replace the AuthWrapper build method to include guest mode
+                  old_auth_check = """  Future<void> _checkSession() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    await auth.checkSession();
+    setState(() => _isChecking = false);
+  }"""
+
+                  new_auth_check = """  Future<void> _checkSession() async {
+    // If in guest/demo mode, skip auth check entirely
+    if (DemoMode.isGuest) {
+      setState(() => _isChecking = false);
+      return;
+    }
+    try {
+      final auth = Provider.of<AuthService>(context, listen: false);
+      await auth.checkSession();
+    } catch (e) {
+      debugPrint('Session check failed: $e');
+      // If session check fails, enable guest mode
+      await DemoMode.enableGuestMode();
+    }
+    setState(() => _isChecking = false);
+  }"""
+
+                  if old_auth_check in content:
+                      content = content.replace(old_auth_check, new_auth_check)
+                      print("Patched _checkSession to handle demo mode")
+                  else:
+                      # Try a more flexible approach - find _checkSession and replace
+                      pattern = r'(Future<void> _checkSession\(\) async \{)\s*(final auth = Provider\.of<AuthService>\(context, listen: false\);)\s*(await auth\.checkSession\(\);)\s*(setState\(\(\) => _isChecking = false\);)\s*(\})'
+                      replacement = r"""\1
+    // If in guest/demo mode, skip auth check entirely
+    if (DemoMode.isGuest) {
+      setState(() => _isChecking = false);
+      return;
+    }
+    try {
+      \2
+      \3
+    } catch (e) {
+      debugPrint('Session check failed: $e');
+      await DemoMode.enableGuestMode();
+    }
+    \4
+  \5"""
+                      new_content = re.sub(pattern, replacement, content, count=1)
+                      if new_content != content:
+                          content = new_content
+                          print("Patched _checkSession with regex")
+
+              # Modify the Consumer<AuthService> builder in AuthWrapper to show GuestHomeScreen
+              old_consumer = """    return Consumer<AuthService>(
+      builder: (context, auth, _) {
+        if (auth.isLoggedIn) {
+          return const HomeScreen();
+        }
+        return const LoginScreen();
+      },
+    );"""
+
+              new_consumer = """    // Show GuestHomeScreen if in demo mode
+    if (DemoMode.isGuest) {
+      return const GuestHomeScreen();
+    }
+
+    return Consumer<AuthService>(
+      builder: (context, auth, _) {
+        if (auth.isLoggedIn) {
+          return const HomeScreen();
+        }
+        return const LoginScreen();
+      },
+    );"""
+
+              if old_consumer in content:
+                  content = content.replace(old_consumer, new_consumer)
+                  print("Added GuestHomeScreen to AuthWrapper build")
+              else:
+                  # Try flexible match
+                  # Find the pattern of Consumer<AuthService> that decides between HomeScreen and LoginScreen
+                  pattern = r'(return Consumer<AuthService>\(\s*builder: \(context, auth, _\) \{\s*if \(auth\.isLoggedIn\) \{\s*return const HomeScreen\(\);\s*\}\s*return const LoginScreen\(\);\s*\},\s*\);)'
+                  replacement = """// Show GuestHomeScreen if in demo mode
+    if (DemoMode.isGuest) {
+      return const GuestHomeScreen();
+    }
+
+    \\1"""
+                  new_content = re.sub(pattern, replacement, content, count=1)
+                  if new_content != content:
+                      content = new_content
+                      print("Added GuestHomeScreen to AuthWrapper (regex)")
+
+              with open(main_file, 'w') as f:
+                  f.write(content)
+              print("Patched main.dart successfully")
+          else:
+              print("main.dart not found!")
+
+          # ============================================================
+          # PATCH: lib/services/api_service.dart
+          # Fix connectivity_plus v6+ returning List<ConnectivityResult>
+          # ============================================================
+          api_file = "lib/services/api_service.dart"
+          if os.path.exists(api_file):
+              with open(api_file, 'r') as f:
+                  api_content = f.read()
+
+              # Fix: connectivityResult.contains(ConnectivityResult.none) ->
+              #      connectivityResult.any((r) => r == ConnectivityResult.none)
+              if ".contains(ConnectivityResult.none)" in api_content:
+                  api_content = re.sub(
+                      r'(\w+)\.contains\(ConnectivityResult\.none\)',
+                      r'\1.any((r) => r == ConnectivityResult.none)',
+                      api_content
+                  )
+                  print("Fixed connectivity .contains() -> .any() in api_service.dart")
+
+              with open(api_file, 'w') as f:
+                  f.write(api_content)
+              print("Patched api_service.dart")
+          else:
+              print("api_service.dart not found!")
+
+          print("=== All demo mode patches complete ===")
+          PYEOF
+
+      - name: Re-get packages after all patches
+        script: flutter pub get
+
       - name: Build APK
         script: flutter build apk --debug --android-skip-build-dependency-validation
 
